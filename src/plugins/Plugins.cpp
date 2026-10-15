@@ -769,6 +769,9 @@ namespace tesworld
 			if (a_signature == SIG_SCOL) {
 				return BaseObjectKind::StaticCollection;
 			}
+			if (a_signature == MakeFourCC('T', 'A', 'C', 'T')) {
+				return BaseObjectKind::TalkingActivator;
+			}
 			if (a_signature == SIG_FLOR) {
 				return BaseObjectKind::Flora;
 			}
@@ -1030,7 +1033,14 @@ namespace tesworld
 					info.editorID = ReadString(payload);
 				} else if (subrecord.signature == SIG_MODL) {
 					info.modelPath = ReadString(payload);
-				} else if (subrecord.signature == SIG_DATA && payload.size() >= 0x20) {
+				} else if (subrecord.signature == SIG_OBND && payload.size() >= 12) {
+                    ObjectBounds bounds{};
+                    for (std::size_t i = 0; i < 3; ++i) {
+                        bounds.min[i] = ReadLE<std::int16_t>(payload, i * 2);
+                        bounds.max[i] = ReadLE<std::int16_t>(payload, 6 + i * 2);
+                    }
+                    info.bounds = bounds;
+                } else if (subrecord.signature == SIG_DATA && payload.size() >= 0x20) {
 					info.density = ReadLE<std::uint8_t>(payload, 0);
 					info.minSlopeDegrees = ReadLE<std::uint8_t>(payload, 1);
 					info.maxSlopeDegrees = ReadLE<std::uint8_t>(payload, 2);
@@ -1112,7 +1122,8 @@ namespace tesworld
 			std::optional<FormID> a_parentCell,
 			FileID a_sourceFileID,
 			const std::shared_ptr<const std::vector<FileID>>& a_sourceMasterFileIDs,
-			std::span<const std::uint8_t> a_data)
+			std::span<const std::uint8_t> a_data,
+            bool a_engineGrass = false)
 		{
 			LandInfo info{};
 			info.formID = a_formID;
@@ -1123,13 +1134,16 @@ namespace tesworld
 				color = { 255, 255, 255 };
 			}
 
+			std::uint32_t dataFlags = 0;
 			std::optional<std::uint16_t> currentLayerIndex;
 			std::optional<std::uint8_t> currentQuadrant;
 			SubrecordCursor cursor(a_data);
 			RawSubrecord subrecord{};
 			std::span<const std::uint8_t> payload;
 			while (cursor.Next(subrecord, payload)) {
-				if (subrecord.signature == SIG_VHGT && payload.size() >= sizeof(float) + LandInfo::VertexCount) {
+				if (subrecord.signature == SIG_DATA && payload.size() >= 4) {
+                    dataFlags = ReadLE<std::uint32_t>(payload, 0);
+                } else if ((!a_engineGrass || (dataFlags & 1u)) && subrecord.signature == SIG_VHGT && payload.size() >= sizeof(float) + LandInfo::VertexCount) {
 					info.heights = DecodeLandHeightsInternal(payload);
 					info.hasHeights = true;
 				} else if (subrecord.signature == SIG_VNML && payload.size() >= LandInfo::VertexCount * 3) {
@@ -1141,7 +1155,7 @@ namespace tesworld
 						};
 					}
 					info.hasSourceNormals = true;
-				} else if (subrecord.signature == SIG_VCLR && payload.size() >= LandInfo::VertexCount * 3) {
+				} else if ((!a_engineGrass || (dataFlags & 2u)) && subrecord.signature == SIG_VCLR && payload.size() >= LandInfo::VertexCount * 3) {
 					for (std::size_t i = 0; i < LandInfo::VertexCount; ++i) {
 						info.vertexColors[i] = {
 							payload[i * 3 + 0],
@@ -1757,7 +1771,7 @@ namespace tesworld
 					a_context.currentCell,
 					a_context.entry.fileID,
 					a_context.sourceMasterFileIDs,
-					recordData));
+					recordData, a_context.mode == PluginParser::ParseMode::StaticGrassIndex));
 				++a_shard.stats.lands;
 			} else if (header.signature == SIG_REFR || header.signature == SIG_ACHR) {
 				if (auto placement = ExtractPlacementFromData(
@@ -2284,7 +2298,7 @@ namespace tesworld
 	StaticPluginShard PluginParser::ParseStaticWorldShard(
 		const LoadOrderEntry& a_entry,
 		std::size_t a_sourceFileIndex,
-		std::span<const LoadOrderEntry> a_loadOrder) const
+		std::span<const LoadOrderEntry> a_loadOrder, ParseMode a_mode) const
 	{
 		const auto totalBegin = Clock::now();
 		StaticPluginShard shard{};
@@ -2317,7 +2331,7 @@ namespace tesworld
 		ParserContext context{
 			.entry = shard.entry,
 			.loadOrder = a_loadOrder,
-			.mode = ParseMode::StaticWorldIndex,
+			.mode = a_mode,
 			.sourceFileIndex = a_sourceFileIndex,
 			.sourceMasterFileIDs = BuildSourceMasterFileIDs(shard.entry, a_loadOrder),
 		};
@@ -2335,7 +2349,7 @@ namespace tesworld
 				ParserContext partContext{
 					.entry = parts[i].entry,
 					.loadOrder = a_loadOrder,
-					.mode = ParseMode::StaticWorldIndex,
+					.mode = a_mode,
 					.sourceFileIndex = a_sourceFileIndex,
 					.sourceMasterFileIDs = context.sourceMasterFileIDs,
 					.currentWorld = units[i].world,
@@ -2384,7 +2398,8 @@ namespace tesworld
 				entry.fileID = FileID{ .kind = ModuleKind::Light, .slot = lightSlot++ };
 			} else {
 				if (fullSlot > 0xFDu) {
-					throw std::runtime_error("too many full plugins");
+					const auto full = std::ranges::count_if(a_entries, [](const LoadOrderEntry& e) { return e.kind != ModuleKind::Light; });
+                    throw std::runtime_error("too many full plugins: " + std::to_string(full) + " enabled; " + entry.path.filename().string() + " is the first past the limit of 254");
 				}
 				entry.fileID = FileID{ .kind = ModuleKind::Full, .slot = fullSlot++ };
 			}
@@ -3425,6 +3440,13 @@ namespace tesworld
 				(shard.header.flags & TES4_FLAG_ESM) != 0 || shard.entry.pluginName.ends_with(".esm") || shard.entry.pluginName.ends_with(".esl");
 			for (const auto& world : shard.worlds) {
 				if (!world.formID.IsNull() && !world.formID.IsNone()) {
+                    if (a_options.enginePartialForms && world.IsPartialForm()) {
+                        if (const auto it = snapshot.worldsByFormID.find(world.formID); it != snapshot.worldsByFormID.end()) {
+                            if (world.fields & WorldInfo::FieldBoundsMin) it->second.boundsMin = world.boundsMin;
+                            if (world.fields & WorldInfo::FieldBoundsMax) it->second.boundsMax = world.boundsMax;
+                        }
+                        continue;
+                    }
 					if (const auto it = snapshot.worldsByFormID.find(world.formID); it != snapshot.worldsByFormID.end() && world.IsPartialForm()) {
 						it->second.Apply(world);
 					} else {
@@ -3468,6 +3490,7 @@ namespace tesworld
 			}
 			for (const auto& cell : shard.cells) {
 				if (!cell.formID.IsNull() && !cell.formID.IsNone()) {
+                    if (a_options.enginePartialForms && cell.IsPartialForm()) continue;
 					if (const auto it = snapshot.cellsByFormID.find(cell.formID); it != snapshot.cellsByFormID.end() && cell.IsPartialForm()) {
 						it->second.Apply(cell);
 					} else {

@@ -61,6 +61,7 @@ namespace tesworld
 
 		[[nodiscard]] bool IsNull() const { return value == 0; }
 		[[nodiscard]] bool IsNone() const { return value == 0xFFFFFFFFu; }
+		[[nodiscard]] bool IsEmpty() const { return IsNull() || IsNone(); }
 		[[nodiscard]] bool IsPlayer() const { return value == 0x14u; }
 		[[nodiscard]] bool IsHardcoded() const { return value < 0x800u; }
 		[[nodiscard]] FileID GetFileID() const;
@@ -212,7 +213,8 @@ namespace tesworld
 		Furniture,
 		Light,
 		StaticCollection,
-		Flora
+		Flora,
+		TalkingActivator
 	};
 
 	struct TextureSetInfo
@@ -344,6 +346,7 @@ namespace tesworld
 		std::uint32_t flags{ 0 };
 		std::string editorID;
 		std::string modelPath;
+		std::optional<ObjectBounds> bounds;
 		std::uint8_t density{ 0 };
 		std::uint8_t minSlopeDegrees{ 0 };
 		std::uint8_t maxSlopeDegrees{ 90 };
@@ -708,6 +711,8 @@ namespace tesworld
 	struct StaticWorldSnapshotBuildOptions
 	{
 		bool parallelPlacementBucketing{ true };
+		// Skyrim LoadPartial: CELL retains all fields; WRLD reads only map bounds. Orphans are skipped.
+		bool enginePartialForms{ false };
 	};
 
 	class GameDataSnapshot
@@ -758,7 +763,9 @@ namespace tesworld
 		enum class ParseMode
 		{
 			FullRaw,
-			StaticWorldIndex
+			StaticWorldIndex,
+			// Skyrim grass loading: LAND DATA gating, with the same decoding and override resolver.
+			StaticGrassIndex
 		};
 
 		[[nodiscard]] PluginHeader ReadHeader(const std::filesystem::path& a_path) const;
@@ -770,7 +777,8 @@ namespace tesworld
 		[[nodiscard]] StaticPluginShard ParseStaticWorldShard(
 			const LoadOrderEntry& a_entry,
 			std::size_t a_sourceFileIndex,
-			std::span<const LoadOrderEntry> a_loadOrder) const;
+			std::span<const LoadOrderEntry> a_loadOrder,
+			ParseMode a_mode = ParseMode::StaticWorldIndex) const;
 
 	private:
 		HeaderCache* _headerCache{ nullptr };

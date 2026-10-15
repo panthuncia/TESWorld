@@ -122,5 +122,42 @@ void CellHasOneLandSlot() {
     reintroduced.lands = first.lands;
     check(reintroduced, old);
 }
+void GrassLoadingPolicy() {
+    Fixture fixture;
+    Bytes flags; U32(flags, 0);
+    Bytes heights(sizeof(float) + LandInfo::VertexCount + 3, 0);
+    Bytes colors(LandInfo::VertexCount * 3, 7);
+    const auto read = [&](bool gated, bool dataFirst) {
+        Bytes payload;
+        if (dataFirst) Sub(payload, "DATA", flags);
+        Sub(payload, "VHGT", heights); Sub(payload, "VCLR", colors);
+        if (!dataFirst) Sub(payload, "DATA", flags);
+        Bytes plugin; Record(plugin, "TES4", 0, 0, {}); Record(plugin, "LAND", 0x800, 0, payload);
+        { std::ofstream out(fixture.path, std::ios::binary); out.write(reinterpret_cast<const char*>(plugin.data()), static_cast<std::streamsize>(plugin.size())); }
+        const std::vector<LoadOrderEntry> order{ LoadOrderEntry{ .path=fixture.path, .pluginName="grass.esp" } };
+        return PluginParser{}.ParseStaticWorldShard(order[0], 0, order, gated ? PluginParser::ParseMode::StaticGrassIndex : PluginParser::ParseMode::StaticWorldIndex);
+    };
+    assert(read(false, true).lands[0].hasHeights);
+    assert(!read(true, true).lands[0].hasHeights);
+    flags[0] = 3;
+    const auto enabled = read(true, true);
+    assert(enabled.lands[0].hasHeights && enabled.lands[0].hasVertexColors);
+    assert(enabled.lands[0].vertexColors[0][0] == 7);
+    assert(!read(true, false).lands[0].hasHeights); // DATA is interpreted in file order.
+
+    StaticPluginShard first, partial;
+    const FormID world{0x800}, cell{0x801};
+    first.worlds.push_back(WorldInfo{ .formID=world, .editorID="Original", .defaultLandHeight=-1000.0f, .defaultWaterHeight=-14000.0f });
+    first.cells.push_back(CellInfo{ .formID=cell, .worldFormID=world, .gridX=-2, .gridY=3 });
+    partial.worlds.push_back(WorldInfo{ .formID=world, .flags=RecordFlagPartialForm, .editorID="Partial", .defaultWaterHeight=0.0f, .fields=WorldInfo::FieldEditorID | WorldInfo::FieldHeights });
+    partial.worlds.push_back(WorldInfo{ .formID=FormID{0x900}, .flags=RecordFlagPartialForm });
+    partial.cells.push_back(CellInfo{ .formID=cell, .flags=RecordFlagPartialForm, .gridX=99, .fields=CellInfo::FieldGrid });
+    const auto snapshot = BuildStaticWorldSnapshot({first, partial}, { .enginePartialForms=true });
+    assert(snapshot.worldsByFormID.at(world).editorID == "Original");
+    assert(snapshot.worldsByFormID.at(world).defaultWaterHeight == -14000.0f);
+    assert(!snapshot.worldsByFormID.contains(FormID{0x900}));
+    assert(snapshot.cellsByFormID.at(cell).gridX == -2);
 }
-int main() { CellFieldsAndCompleteInflation(); IgnoredIsNotDeleted(); CellHasOneLandSlot(); std::cout << "tesworld reader regressions passed\n"; }
+
+}
+int main() { CellFieldsAndCompleteInflation(); IgnoredIsNotDeleted(); CellHasOneLandSlot(); GrassLoadingPolicy(); std::cout << "tesworld reader regressions passed\n"; }

@@ -77,3 +77,13 @@ differential validator reports these conflicts as unresolved coverage and retain
 CELL LAND is a singleton slot: later explicit children replace it even with a new identity; an omitted child preserves
 it, deleting its current identity clears it without reviving displaced records, and deleting a displaced identity
 does not clear its replacement.
+### Grass consumers
+
+`PluginParser::ParseMode::StaticGrassIndex` uses the same plugin reader with Skyrim's LAND DATA
+bit gating (height bit 0, vertex color bit 1, in subrecord order). The default static mode retains
+all decoded source arrays for LOD and differential validation. `enginePartialForms` in snapshot
+build options preserves Skyrim LoadPartial behavior: existing CELL fields are retained, WRLD
+updates only map bounds, and a partial form without an earlier definition is skipped. The default
+continues to expose field-presence merging for existing LOD consumers. FasterNGIO projects the
+resolved snapshot into grass inputs and applies engine water rounding; it retains its triangle
+sampler and vanilla RNG sequence. Both modes share ignored-record and singleton CELL LAND fixes.
