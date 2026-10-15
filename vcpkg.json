@@ -1,0 +1,47 @@
+{
+  "name": "tesworld",
+  "version-string": "0.1.0",
+  "description": "Reads Bethesda game worlds: plugins and load order, terrain, placements, archives and meshes.",
+  "license": "GPL-3.0-or-later",
+  "builtin-baseline": "40f3c709db80acf154ac4b17a1f83c564ebd022e",
+  "dependencies": [
+    "lz4",
+    "tbb",
+    "zlib",
+    "nlohmann-json",
+    {
+      "name": "directxtex",
+      "default-features": false
+    }
+  ],
+  "features": {
+    "profiling": {
+      "description": "BasicTelemetry/Tracy zones (TESWORLD_WITH_PROFILING), with Tracy's capture and csvexport tools",
+      "dependencies": [
+        "sqlite3",
+        {
+          "name": "tracy",
+          "features": [
+            "cli-tools"
+          ]
+        }
+      ]
+    },
+    "gpu": {
+      "description": "tesworld::gpu: BasicRHI/OpenRenderGraph compute (TESWORLD_WITH_GPU); the Vulkan SDK is needed to build",
+      "dependencies": [
+        "spdlog",
+        "fmt",
+        "flecs",
+        "boost-container-hash",
+        "directx-headers",
+        "directx-dxc",
+        "tracy",
+        {
+          "name": "directxmath",
+          "platform": "!windows"
+        }
+      ]
+    }
+  }
+}

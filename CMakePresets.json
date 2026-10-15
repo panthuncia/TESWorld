@@ -1,0 +1,158 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+    },
+    {
+      "name": "windows",
+      "inherits": "base",
+      "displayName": "Windows x64 (Visual Studio 2026)",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static-md"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "linux",
+      "inherits": "base",
+      "displayName": "Linux x64 (Ninja)",
+      "generator": "Ninja Multi-Config",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "windows-profile",
+      "inherits": "windows",
+      "displayName": "Windows x64, profiling (BasicTelemetry/Tracy)",
+      "cacheVariables": {
+        "VCPKG_MANIFEST_FEATURES": "profiling",
+        "TESWORLD_WITH_PROFILING": "ON"
+      }
+    },
+    {
+      "name": "linux-profile",
+      "inherits": "linux",
+      "displayName": "Linux x64, profiling (BasicTelemetry/Tracy)",
+      "cacheVariables": {
+        "VCPKG_MANIFEST_FEATURES": "profiling",
+        "TESWORLD_WITH_PROFILING": "ON"
+      }
+    },
+    {
+      "name": "windows-gpu",
+      "inherits": "windows",
+      "displayName": "windows x64, GPU (BasicRHI/OpenRenderGraph)",
+      "cacheVariables": {
+        "VCPKG_MANIFEST_FEATURES": "gpu",
+        "TESWORLD_WITH_GPU": "ON"
+      }
+    },
+    {
+      "name": "linux-gpu",
+      "inherits": "linux",
+      "displayName": "linux x64, GPU (BasicRHI/OpenRenderGraph)",
+      "cacheVariables": {
+        "VCPKG_MANIFEST_FEATURES": "gpu",
+        "TESWORLD_WITH_GPU": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows",
+      "configurePreset": "windows",
+      "configuration": "Release"
+    },
+    {
+      "name": "linux",
+      "configurePreset": "linux",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-profile",
+      "configurePreset": "windows-profile",
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-profile",
+      "configurePreset": "linux-profile",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-gpu",
+      "configurePreset": "windows-gpu",
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-gpu",
+      "configurePreset": "linux-gpu",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows",
+      "configurePreset": "windows",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux",
+      "configurePreset": "linux",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-profile",
+      "configurePreset": "windows-profile",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-profile",
+      "configurePreset": "linux-profile",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-gpu",
+      "configurePreset": "windows-gpu",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-gpu",
+      "configurePreset": "linux-gpu",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
