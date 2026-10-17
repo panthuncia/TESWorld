@@ -117,6 +117,16 @@ int main()
 	assert(persistentCellPlacements != nullptr);
 	assert(persistentCellPlacements->size() == 1);
 	assert(persistentSnapshot.GetInteriorCell(persistentExteriorCell) == nullptr);
+	for (const bool parallel : { false, true }) {
+		auto disabledShard = persistentExteriorShard;
+		disabledShard.placements[0].flags |= 1u << 11;
+		const auto filtered = BuildStaticWorldSnapshot({ disabledShard }, { .parallelPlacementBucketing = parallel });
+		assert(filtered.GetExteriorCell(world, 4, -7) == nullptr);
+		const auto retained = BuildStaticWorldSnapshot({ disabledShard }, { .parallelPlacementBucketing = parallel, .includeDisabledPlacements = true });
+		const auto* candidates = retained.GetExteriorCell(world, 4, -7);
+		assert(candidates && candidates->size() == 1 && candidates->front().IsInitiallyDisabled());
+		assert(retained.buildStats.skippedDisabledPlacements == 0);
+	}
 
 	// A partial form (as SR Exterior Cities overrides Tamriel and its cells with only their editor IDs) changes only the
 	// fields it has; a whole override replaces every one.
@@ -126,7 +136,7 @@ int main()
 		master.worlds.push_back(WorldInfo{ .formID = world, .editorID = "Tamriel", .parentUseFlags = 0, .dataFlags = 0, .defaultLandHeight = -27000.0f,
 			.defaultWaterHeight = -14000.0f, .lodWaterHeight = -14000.0f,
 			.fields = WorldInfo::FieldEditorID | WorldInfo::FieldHeights | WorldInfo::FieldLodWaterHeight });
-		master.cells.push_back(CellInfo{ .formID = partialCell, .worldFormID = world, .editorID = "Coast", .cellFlags = 0x2, .gridX = 3, .gridY = -2,
+		master.cells.push_back(CellInfo{ .formID = partialCell, .worldFormID = world, .editorID = "Coast", .cellFlags = 0x2, .gridX = 3, .gridY = -2, .forceHideLand = 0x80000005u,
 			.waterHeight = -13670.0f, .fields = CellInfo::FieldEditorID | CellInfo::FieldData | CellInfo::FieldGrid | CellInfo::FieldWater });
 		StaticPluginShard partial;
 		partial.worlds.push_back(WorldInfo{ .formID = world, .flags = RecordFlagPartialForm, .editorID = "Tamriel", .fields = WorldInfo::FieldEditorID });
@@ -137,6 +147,7 @@ int main()
 		assert(tamriel.defaultWaterHeight == -14000.0f && tamriel.defaultLandHeight == -27000.0f && tamriel.lodWaterHeight == -14000.0f);
 		const auto& coast = merged.cellsByFormID.at(partialCell);
 		assert(coast.editorID == "CoastRenamed" && coast.gridX == 3 && coast.gridY == -2 && coast.waterHeight == -13670.0f && coast.cellFlags == 0x2);
+		assert(coast.forceHideLand == 0x80000005u);
 
 		// The same overrides, whole: nothing below them shows.
 		partial.worlds.front().flags = 0;

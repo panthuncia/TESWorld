@@ -38,7 +38,25 @@ namespace tesworld::nif
 		Vec2 uvScale{ 1.0f, 1.0f };
 		std::uint32_t textureClampMode{ 3 };
 		float alpha{ 1.0f };
+		float refractionStrength{ 0.0f };
 		float glossiness{ 1.0f };
+		Vec3 specularColor{ 1.0f, 1.0f, 1.0f };
+		float specularStrength{ 1.0f };
+		float softLighting{ 0.3f };
+		float rimLightPower{ 2.0f };
+		float environmentMapScale{ 1.0f };
+		float parallaxInnerLayerThickness{ 0.0f };
+		float parallaxRefractionScale{ 1.0f };
+		Vec2 parallaxInnerLayerTextureScale{ 1.0f, 1.0f };
+		float parallaxEnvironmentMapStrength{ 1.0f };
+		Vec3 skinTintColor{ 1.0f, 1.0f, 1.0f };
+		Vec3 hairTintColor{ 1.0f, 1.0f, 1.0f };
+		float lightingMaxPasses{ 1.0f };
+		float lightingScale{ 1.0f };
+		Vec4 sparkleParameters{};
+		float eyeCubemapScale{ 1.0f };
+		Vec3 eyeLeftReflectionCenter{};
+		Vec3 eyeRightReflectionCenter{};
 		Vec3 emissiveColor{};
 		float emissiveMultiple{ 1.0f };
 		// NiAlphaProperty: blending and testing as the game reads its flags.
@@ -78,6 +96,43 @@ namespace tesworld::nif
 	};
 
 	[[nodiscard]] std::optional<Model> ReadModel(std::span<const std::uint8_t> a_bytes, std::string* a_error = nullptr);
+
+	// Raw-file observations, including blocks not represented by the static triangle reader. No export or mutation.
+	struct InspectedBlock
+	{
+		std::uint32_t id{ 0 };
+		std::string type;
+		bool opaque{ false };
+		bool controller{ false };
+		bool node{ false }, objectNet{ false };
+		std::string name;
+		std::optional<std::uint32_t> controllerRef, nextController, controllerTarget;
+		std::vector<std::uint32_t> children;
+		std::vector<std::uint32_t> pointers;
+		std::vector<std::string> textures;
+		bool shape{ false }, sceneObject{ false }, shaderProperty{ false };
+		std::optional<std::uint32_t> shaderRef, textureSetRef;
+		std::vector<std::uint32_t> sceneChildren;
+		std::vector<std::string> textureSlots;
+	};
+	struct ModelStructure
+	{
+		std::uint32_t fileVersion{ 0 }, userVersion{ 0 }, streamVersion{ 0 };
+		bool hasRoot{ false };
+		std::vector<std::uint32_t> roots;
+		std::vector<InspectedBlock> blocks;
+	};
+	[[nodiscard]] std::optional<ModelStructure> InspectStructure(std::span<const std::uint8_t> a_bytes, std::string* a_error = nullptr);
+
+	struct TextureSetEdit
+	{
+		std::uint32_t block{}, slot{};
+		std::string expected, replacement;
+	};
+	// Skyrim SE texture-set payload edits. All other blocks, header fields and footer bytes remain identical.
+	// Expected strings guard stale edits; rejects noncanonical headers, malformed blocks and unsafe replacement paths.
+	[[nodiscard]] std::optional<std::vector<std::uint8_t>> RewriteTextureSets(std::span<const std::uint8_t> a_bytes,
+		std::span<const TextureSetEdit> a_edits, std::string* a_error = nullptr);
 
 	// ---- Writing ----
 

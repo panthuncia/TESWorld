@@ -115,6 +115,44 @@ namespace tesworld::texture
 		}
 	}
 
+	std::optional<DdsStructure> InspectDds(std::span<const std::uint8_t> a_bytes, std::string* a_error)
+	{
+		const auto fail = [&](const char* message) -> std::optional<DdsStructure> {
+			if (a_error) *a_error = message;
+			return std::nullopt;
+		};
+		if (a_bytes.size() > 256u * 1024u * 1024u) return fail("DDS input exceeds inspection limits");
+		DirectX::TexMetadata metadata{};
+		if (FAILED(DirectX::GetMetadataFromDDSMemory(a_bytes.data(), a_bytes.size(), DirectX::DDS_FLAGS_NONE, metadata)))
+			return fail("invalid DDS header or unsupported format");
+		const bool cube = metadata.IsCubemap();
+		if (metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D || metadata.depth != 1 || metadata.arraySize != (cube ? 6u : 1u))
+			return fail("DDS inspection supports 2D textures and single cubemaps only");
+		if (!metadata.width || !metadata.height || metadata.width > 16384 || metadata.height > 16384 || (cube && metadata.width != metadata.height))
+			return fail("DDS dimensions are invalid or exceed inspection limits");
+		std::size_t fullMips = 1;
+		for (auto size = (std::max)(metadata.width, metadata.height); size > 1; size /= 2) ++fullMips;
+		if (!metadata.mipLevels || metadata.mipLevels > fullMips) return fail("invalid DDS mip count");
+		std::uint64_t payload = 0;
+		auto width = metadata.width, height = metadata.height;
+		for (std::size_t mip = 0; mip < metadata.mipLevels; ++mip) {
+			std::size_t row = 0, slice = 0;
+			if (FAILED(DirectX::ComputePitch(metadata.format, width, height, row, slice))) return fail("unsupported DDS storage format");
+			payload += static_cast<std::uint64_t>(slice) * metadata.arraySize;
+			if (payload > 256u * 1024u * 1024u || payload > a_bytes.size()) return fail("DDS payload is truncated or exceeds inspection limits");
+			width = (std::max)(std::size_t{1}, width / 2);
+			height = (std::max)(std::size_t{1}, height / 2);
+		}
+		DirectX::ScratchImage stored;
+		if (FAILED(DirectX::LoadFromDDSMemory(a_bytes.data(), a_bytes.size(), DirectX::DDS_FLAGS_NONE, &metadata, stored)))
+			return fail("DDS image payload is invalid or truncated");
+		return DdsStructure{ static_cast<std::uint32_t>(metadata.width), static_cast<std::uint32_t>(metadata.height),
+			static_cast<std::uint32_t>(metadata.mipLevels), static_cast<std::uint32_t>(metadata.format),
+			static_cast<std::uint32_t>(metadata.arraySize), static_cast<std::uint32_t>(metadata.GetAlphaMode()), cube,
+			DirectX::IsSRGB(metadata.format), DirectX::HasAlpha(metadata.format), DirectX::IsCompressed(metadata.format),
+			metadata.mipLevels == fullMips, payload };
+	}
+
 	void Image::SetTexel(std::uint32_t a_x, std::uint32_t a_y, Vec4 a_value)
 	{
 		auto* p = rgba.data() + (static_cast<std::size_t>(a_y) * width + a_x) * 4;
@@ -143,22 +181,33 @@ namespace tesworld::texture
 				return std::nullopt;
 			};
 			MipChain chain;
-			chain.hasAlpha = DirectX::HasAlpha(a_metadata.format) && a_metadata.format != DXGI_FORMAT_BC1_UNORM;
+			chain.hasAlpha = DirectX::HasAlpha(a_metadata.format) && DirectX::MakeLinear(a_metadata.format) != DXGI_FORMAT_BC1_UNORM;
+			if (!std::isfinite(a_options.srgbScale) || a_options.srgbScale < 0.0f || a_options.srgbScale > 4.0f)
+				return fail("sRGB conversion scale is outside 0..4");
 			const auto convert = [&](const DirectX::Image& a_source) -> std::optional<Image> {
+				// Work on stored samples first; DirectXTex format-dependent implicit conversions must not affect data textures.
+				auto stored = a_source;
+				stored.format = DirectX::MakeLinear(stored.format);
 				DirectX::ScratchImage converted;
-				HRESULT result;
-				if (DirectX::IsCompressed(a_source.format)) {
-					result = DirectX::Decompress(a_source, DXGI_FORMAT_R8G8B8A8_UNORM, converted);
-				} else if (a_source.format == DXGI_FORMAT_R8G8B8A8_UNORM) {
-					return FromDirectXImage(a_source, a_options.flipGreen);
+				std::optional<Image> image;
+				if (stored.format == DXGI_FORMAT_R8G8B8A8_UNORM) {
+					image = FromDirectXImage(stored, a_options.flipGreen);
 				} else {
-					// Not through WIC: it needs COM on Windows, and isn't there elsewhere.
-					result = DirectX::Convert(a_source, DXGI_FORMAT_R8G8B8A8_UNORM, DirectX::TEX_FILTER_FORCE_NON_WIC, DirectX::TEX_THRESHOLD_DEFAULT, converted);
+					const auto result = DirectX::IsCompressed(stored.format)
+						? DirectX::Decompress(stored, DXGI_FORMAT_R8G8B8A8_UNORM, converted)
+						: DirectX::Convert(stored, DXGI_FORMAT_R8G8B8A8_UNORM, DirectX::TEX_FILTER_FORCE_NON_WIC, DirectX::TEX_THRESHOLD_DEFAULT, converted);
+					if (FAILED(result) || !converted.GetImage(0, 0, 0)) return std::nullopt;
+					image = FromDirectXImage(*converted.GetImage(0, 0, 0), a_options.flipGreen);
 				}
-				if (FAILED(result) || !converted.GetImage(0, 0, 0)) {
-					return std::nullopt;
+				if (a_options.linearizeSrgb && DirectX::IsSRGB(a_metadata.format)) {
+					for (std::size_t i = 0; i < image->rgba.size(); ++i) {
+						if ((i & 3) == 3) continue;
+						const float value = static_cast<float>(image->rgba[i]) / 255.0f;
+						const float linear = value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
+						image->rgba[i] = ToByte(linear * a_options.srgbScale);
+					}
 				}
-				return FromDirectXImage(*converted.GetImage(0, 0, 0), a_options.flipGreen);
+				return image;
 			};
 
 			const auto fits = [&](std::size_t a_width, std::size_t a_height) {

@@ -2,10 +2,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <set>
 #include <spanstream>
+#include <stdexcept>
 #include <string_view>
 
 #include <NifFile.hpp>
+#include <Factory.hpp>
 
 namespace tesworld::nif
 {
@@ -42,7 +45,25 @@ namespace tesworld::nif
 					shader.uvScale = { lighting->uvScale.u, lighting->uvScale.v };
 					shader.textureClampMode = static_cast<std::uint32_t>(lighting->textureClampMode);
 					shader.alpha = lighting->alpha;
+					shader.refractionStrength = lighting->refractionStrength;
 					shader.glossiness = lighting->glossiness;
+					shader.specularColor = { lighting->specularColor.x, lighting->specularColor.y, lighting->specularColor.z };
+					shader.specularStrength = lighting->specularStrength;
+					shader.softLighting = lighting->softlighting;
+					shader.rimLightPower = lighting->rimlightPower;
+					shader.environmentMapScale = lighting->environmentMapScale;
+					shader.parallaxInnerLayerThickness = lighting->parallaxInnerLayerThickness;
+					shader.parallaxRefractionScale = lighting->parallaxRefractionScale;
+					shader.parallaxInnerLayerTextureScale = { lighting->parallaxInnerLayerTextureScale.u, lighting->parallaxInnerLayerTextureScale.v };
+					shader.parallaxEnvironmentMapStrength = lighting->parallaxEnvmapStrength;
+					shader.skinTintColor = { lighting->skinTintColor.x, lighting->skinTintColor.y, lighting->skinTintColor.z };
+					shader.hairTintColor = { lighting->hairTintColor.x, lighting->hairTintColor.y, lighting->hairTintColor.z };
+					shader.lightingMaxPasses = lighting->maxPasses;
+					shader.lightingScale = lighting->scale;
+					shader.sparkleParameters = { lighting->sparkleParameters.r, lighting->sparkleParameters.g, lighting->sparkleParameters.b, lighting->sparkleParameters.a };
+					shader.eyeCubemapScale = lighting->eyeCubemapScale;
+					shader.eyeLeftReflectionCenter = { lighting->eyeLeftReflectionCenter.x, lighting->eyeLeftReflectionCenter.y, lighting->eyeLeftReflectionCenter.z };
+					shader.eyeRightReflectionCenter = { lighting->eyeRightReflectionCenter.x, lighting->eyeRightReflectionCenter.y, lighting->eyeRightReflectionCenter.z };
 					shader.emissiveColor = { lighting->emissiveColor.x, lighting->emissiveColor.y, lighting->emissiveColor.z };
 					shader.emissiveMultiple = lighting->emissiveMultiple;
 				} else if (auto* effect = dynamic_cast<nifly::BSEffectShaderProperty*>(source)) {
@@ -159,6 +180,93 @@ namespace tesworld::nif
 					}
 				}
 			}
+		}
+	}
+
+	std::optional<ModelStructure> InspectStructure(std::span<const std::uint8_t> a_bytes, std::string* a_error)
+	{
+		try {
+			std::ispanstream stream(std::span<const char>(reinterpret_cast<const char*>(a_bytes.data()), a_bytes.size()));
+			nifly::NiHeader header;
+			nifly::NiIStream input(&stream, &header);
+			header.Get(input);
+			if (!header.IsValid() || header.GetVersion().File() < nifly::V20_2_0_5 || header.HasInlineBlockTypes())
+				throw std::runtime_error("model inspection requires a modern NIF with block sizes");
+			if (header.GetNumBlocks() > 100000) throw std::runtime_error("model inspection exceeds 100000 blocks");
+			std::vector<std::unique_ptr<nifly::NiObject>> blocks;
+			blocks.reserve(header.GetNumBlocks());
+			nifly::NiFactoryRegister factories;
+			// NifFile::Load prepares geometry and trims texture paths. Read blocks directly so inspection never conceals
+			// invalid references or changes the texture strings it is meant to validate.
+			for (std::uint32_t id = 0; id < header.GetNumBlocks(); ++id) {
+				const auto before = stream.tellg();
+				const auto size = header.GetBlockSize(id);
+				if (before < 0 || static_cast<std::size_t>(before) > a_bytes.size() || size > a_bytes.size() - static_cast<std::size_t>(before))
+					throw std::runtime_error("NIF block extends beyond its input");
+				if (auto* factory = factories.GetFactoryByName(header.GetBlockTypeStringById(id))) blocks.push_back(factory->Load(input));
+				else blocks.push_back(std::make_unique<nifly::NiUnknown>(input, size));
+				if (!stream || stream.tellg() - before != static_cast<std::streamoff>(size)) throw std::runtime_error("NIF block size does not match its parsed contents");
+			}
+			header.GetFooter(input);
+			if (!stream) throw std::runtime_error("NIF footer is incomplete");
+			header.SetBlockReference(&blocks);
+			header.FillStringRefs();
+			const auto& version = header.GetVersion();
+			ModelStructure result{ .fileVersion = static_cast<std::uint32_t>(version.File()), .userVersion = version.User(),
+				.streamVersion = version.Stream(), .roots = header.GetRootBlockIds() };
+			for (const auto root : result.roots) if (header.GetBlock<nifly::NiNode>(root)) result.hasRoot = true;
+			result.blocks.reserve(header.GetNumBlocks());
+			for (std::uint32_t id = 0; id < header.GetNumBlocks(); ++id) {
+				auto* block = header.GetBlock<nifly::NiObject>(id);
+				if (!block) throw std::runtime_error("missing NIF block");
+				InspectedBlock observed{ .id = id, .type = header.GetBlockTypeStringById(id),
+					.opaque = dynamic_cast<nifly::NiUnknown*>(block) != nullptr,
+					.controller = dynamic_cast<nifly::NiTimeController*>(block) != nullptr };
+				observed.node = dynamic_cast<nifly::NiNode*>(block) != nullptr;
+				observed.sceneObject = dynamic_cast<nifly::NiAVObject*>(block) != nullptr;
+				if (auto* node = dynamic_cast<nifly::NiNode*>(block))
+					for (const auto& child : node->childRefs) observed.sceneChildren.push_back(child.index);
+				if (const auto* shape = dynamic_cast<nifly::NiShape*>(block)) {
+					observed.shape = true;
+					if (const auto* shader = shape->ShaderPropertyRef(); shader && shader->index != nifly::NIF_NPOS) observed.shaderRef = shader->index;
+				}
+				if (const auto* shader = dynamic_cast<nifly::NiShader*>(block)) {
+					observed.shaderProperty = true;
+					if (const auto* texture = shader->TextureSetRef(); texture && texture->index != nifly::NIF_NPOS) observed.textureSetRef = texture->index;
+				}
+				if (const auto* object = dynamic_cast<nifly::NiObjectNET*>(block)) {
+					observed.objectNet = true;
+					observed.name = object->name.get();
+					if (object->controllerRef.index != nifly::NIF_NPOS) observed.controllerRef = object->controllerRef.index;
+				}
+				if (const auto* controller = dynamic_cast<nifly::NiTimeController*>(block)) {
+					if (controller->nextControllerRef.index != nifly::NIF_NPOS) observed.nextController = controller->nextControllerRef.index;
+					if (controller->targetRef.index != nifly::NIF_NPOS) observed.controllerTarget = controller->targetRef.index;
+				}
+				std::set<nifly::NiRef*> children;
+				std::set<nifly::NiPtr*> pointers;
+				block->GetChildRefs(children);
+				block->GetPtrs(pointers);
+				for (const auto* ref : children) if (ref->index != nifly::NIF_NPOS) observed.children.push_back(ref->index);
+				for (const auto* ref : pointers) if (ref->index != nifly::NIF_NPOS) observed.pointers.push_back(ref->index);
+				std::ranges::sort(observed.children);
+				std::ranges::sort(observed.pointers);
+				if (auto* textures = dynamic_cast<nifly::BSShaderTextureSet*>(block))
+					for (const auto& texture : textures->textures) {
+						observed.textureSlots.push_back(texture.get());
+						if (!texture.get().empty()) observed.textures.push_back(texture.get());
+					}
+				if (auto* effect = dynamic_cast<nifly::BSEffectShaderProperty*>(block)) {
+					for (const auto* texture : { &effect->sourceTexture, &effect->greyscaleTexture, &effect->envMapTexture, &effect->normalTexture,
+						&effect->envMaskTexture, &effect->reflectanceTexture, &effect->lightingTexture, &effect->emitGradientTexture })
+						if (!texture->get().empty()) observed.textures.push_back(texture->get());
+				}
+				result.blocks.push_back(std::move(observed));
+			}
+			return result;
+		} catch (const std::exception& ex) {
+			if (a_error) *a_error = ex.what();
+			return std::nullopt;
 		}
 	}
 

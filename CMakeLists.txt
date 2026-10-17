@@ -157,6 +157,7 @@ if(TESWORLD_WITH_NIF)
 
 	add_library(tesworld_nif STATIC
 		src/nif/NifReader.cpp
+		src/nif/NifTextureRewrite.cpp
 		src/nif/NifWriter.cpp
 		src/nif/NifWriterReference.cpp
 	)

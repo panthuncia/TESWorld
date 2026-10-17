@@ -640,39 +640,40 @@ namespace tesworld::nif
 					_out.Put(data.emissiveMultiple);
 					_out.Put(data.textureClampMode);
 					_out.Put(data.alpha);
-					_out.Put(0.0f);  // refraction strength
+					_out.Put(data.refractionStrength);
 					_out.Put(data.glossiness);
-					_out.PutVector({ 1.0f, 1.0f, 1.0f });  // specular colour
-					_out.Put(1.0f);  // specular strength
-					_out.Put(0.3f);  // soft lighting
-					_out.Put(2.0f);  // rim light power
-					// The parameters of the shader type, at nifly's defaults.
+					_out.PutVector(data.specularColor);
+					_out.Put(data.specularStrength);
+					_out.Put(data.softLighting);
+					_out.Put(data.rimLightPower);
+					// Preserve the source parameters, including fields repurposed by PBR (docs/systems/lod-formats.md).
 					switch (data.shaderType) {
-					case 1:  // environment map scale
-						_out.Put(1.0f);
+					case 1:
+						_out.Put(data.environmentMapScale);
 						break;
-					case 5:  // skin tint
-					case 6:  // hair tint
-						_out.PutVector({ 1.0f, 1.0f, 1.0f });
+					case 5:
+						_out.PutVector(data.skinTintColor);
 						break;
-					case 7:  // max passes, scale
-						_out.Put(1.0f);
-						_out.Put(1.0f);
+					case 6:
+						_out.PutVector(data.hairTintColor);
 						break;
-					case 11:  // parallax: inner layer thickness, refraction scale, inner layer texture scale, envmap strength
-						_out.Put(0.0f);
-						_out.Put(1.0f);
-						_out.Put(1.0f);
-						_out.Put(1.0f);
-						_out.Put(1.0f);
+					case 7:
+						_out.Put(data.lightingMaxPasses);
+						_out.Put(data.lightingScale);
 						break;
-					case 14:  // sparkle
-						_out.Put(Vec4{});
+					case 11:
+						_out.Put(data.parallaxInnerLayerThickness);
+						_out.Put(data.parallaxRefractionScale);
+						_out.Put(data.parallaxInnerLayerTextureScale);
+						_out.Put(data.parallaxEnvironmentMapStrength);
 						break;
-					case 16:  // eye: cubemap scale, left and right reflection centres
-						_out.Put(1.0f);
-						_out.PutVector({});
-						_out.PutVector({});
+					case 14:
+						_out.Put(data.sparkleParameters);
+						break;
+					case 16:
+						_out.Put(data.eyeCubemapScale);
+						_out.PutVector(data.eyeLeftReflectionCenter);
+						_out.PutVector(data.eyeRightReflectionCenter);
 						break;
 					default:
 						break;

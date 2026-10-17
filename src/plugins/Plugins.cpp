@@ -1103,6 +1103,7 @@ namespace tesworld
 				const auto bytes = SubrecordData(a_record, *xclc);
 				info.gridX = ReadLE<std::int32_t>(bytes, 0);
 				info.gridY = ReadLE<std::int32_t>(bytes, 4);
+				info.forceHideLand = bytes.size() >= 12 ? ReadLE<std::uint32_t>(bytes, 8) : 0;
 				info.fields |= CellInfo::FieldGrid;
 			}
 			if (const auto* xclw = FindSubrecord(a_record, SIG_XCLW); xclw && xclw->size >= 4) {
@@ -1444,6 +1445,7 @@ namespace tesworld
 				} else if (subrecord.signature == SIG_XCLC && payload.size() >= 8) {
 					info.gridX = ReadLE<std::int32_t>(payload, 0);
 					info.gridY = ReadLE<std::int32_t>(payload, 4);
+					info.forceHideLand = payload.size() >= 12 ? ReadLE<std::uint32_t>(payload, 8) : 0;
 					info.fields |= CellInfo::FieldGrid;
 				} else if (subrecord.signature == SIG_XCLW && payload.size() >= 4) {
 					const auto waterHeight = ReadLE<float>(payload, 0);
@@ -1480,6 +1482,7 @@ namespace tesworld
 			} else if (a_signature == SIG_XCLC && a_payload.size() >= 8) {
 				a_scan.info.gridX = ReadLE<std::int32_t>(a_payload, 0);
 				a_scan.info.gridY = ReadLE<std::int32_t>(a_payload, 4);
+				a_scan.info.forceHideLand = a_payload.size() >= 12 ? ReadLE<std::uint32_t>(a_payload, 8) : 0;
 				a_scan.info.fields |= CellInfo::FieldGrid;
 			} else if (a_signature == SIG_XCLW && a_payload.size() >= 4) {
 				const auto waterHeight = ReadLE<float>(a_payload, 0);
@@ -3325,6 +3328,7 @@ namespace tesworld
 		if (a_partial.fields & FieldGrid) {
 			gridX = a_partial.gridX;
 			gridY = a_partial.gridY;
+			forceHideLand = a_partial.forceHideLand;
 		}
 		if (a_partial.fields & FieldWater) waterHeight = a_partial.waterHeight;
 		fields |= a_partial.fields;
@@ -3600,7 +3604,7 @@ namespace tesworld
 		snapshot.interiorPlacementsByCell.reserve(4096);
 
 		const auto bucketPlacement = [&](PlacementInfo placement) {
-			if (placement.IsInitiallyDisabled()) {
+			if (placement.IsInitiallyDisabled() && !a_options.includeDisabledPlacements) {
 				++snapshot.buildStats.skippedDisabledPlacements;
 				return;
 			}
@@ -3660,7 +3664,7 @@ namespace tesworld
 					auto& local = localBuckets.local();
 					for (std::size_t i = range.begin(); i != range.end(); ++i) {
 						PlacementInfo placement = *winningPlacements[i];
-						if (placement.IsInitiallyDisabled()) {
+						if (placement.IsInitiallyDisabled() && !a_options.includeDisabledPlacements) {
 							++local.disabled;
 							continue;
 						}

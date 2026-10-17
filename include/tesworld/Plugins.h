@@ -293,6 +293,8 @@ namespace tesworld
 		std::uint16_t cellFlags{ 0 };
 		std::optional<std::int32_t> gridX;
 		std::optional<std::int32_t> gridY;
+		// XCLC's optional third word; low four bits hide the southwest, southeast, northwest and northeast LAND quadrants.
+		std::uint32_t forceHideLand{ 0 };
 		std::optional<float> waterHeight;
 		// The fields the record has (Field*): those a partial form changes.
 		std::uint8_t fields{ 0 };
@@ -713,6 +715,8 @@ namespace tesworld
 		bool parallelPlacementBucketing{ true };
 		// Skyrim LoadPartial: CELL retains all fields; WRLD reads only map bounds. Orphans are skipped.
 		bool enginePartialForms{ false };
+		// Consumers planning dynamic references need these observations before their own visibility classification.
+		bool includeDisabledPlacements{ false };
 	};
 
 	class GameDataSnapshot

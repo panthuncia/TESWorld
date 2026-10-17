@@ -4,6 +4,7 @@
 #include "tesworld/Stochastic.h"
 #include "tesworld/Texture.h"
 
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstring>
@@ -39,6 +40,59 @@ namespace
 		return image;
 	}
 
+	std::vector<std::uint8_t> MarkSrgb(std::vector<std::uint8_t> a_dds, std::uint32_t a_format)
+	{
+		const auto put = [&](std::size_t offset, std::uint32_t value) { std::memcpy(a_dds.data() + offset, &value, 4); };
+		std::uint32_t fourCC; std::memcpy(&fourCC, a_dds.data() + 84, 4);
+		if (fourCC != 0x30315844u) {
+			const std::array<std::uint32_t, 5> dx10{ a_format, 3, 0, 1, 0 };
+			const auto* bytes = reinterpret_cast<const std::uint8_t*>(dx10.data());
+			a_dds.insert(a_dds.begin() + 128, bytes, bytes + 20);
+			put(80, 4); put(84, 0x30315844u);
+			for (std::size_t offset = 88; offset <= 104; offset += 4) put(offset, 0);
+		} else put(128, a_format);
+		return a_dds;
+	}
+
+	void SrgbConversionIsExplicitAndSharedByRangeReads()
+	{
+		Image image(64, 32);
+		for (std::uint32_t y = 0; y < image.height; ++y)
+			for (std::uint32_t x = 0; x < image.width; ++x) image.SetTexel(x, y, { 0.5f, 0.03f, 0.9f, 0.75f });
+		for (const auto [format, srgb] : { std::pair{Format::RGBA8, 29u}, {Format::BC1, 72u}, {Format::BC3, 78u}, {Format::BC7, 99u} }) {
+			const auto linear = EncodeDds(BuildMips(image), format); assert(linear);
+			const auto bytes = MarkSrgb(*linear, srgb);
+			const auto raw = DecodeDds(bytes); const auto original = DecodeDds(*linear); assert(raw && original && raw->hasAlpha == original->hasAlpha);
+			for (std::size_t i = 0; i < raw->levels.size(); ++i) assert(raw->levels[i].rgba == original->levels[i].rgba);
+			const DecodeOptions options{ .maxSize = 8, .linearizeSrgb = true, .srgbScale = 0.65f };
+			const auto converted = DecodeDds(bytes, options); assert(converted && converted->hasAlpha == raw->hasAlpha);
+			const auto unchanged = DecodeDds(*linear, options); assert(unchanged && unchanged->levels.front().rgba == original->levels[3].rgba);
+			const ByteReader reader = [&](std::uint64_t offset, std::uint64_t length) -> std::optional<std::vector<std::uint8_t>> {
+				const auto from = (std::min<std::uint64_t>)(offset, bytes.size());
+				const auto to = from + (std::min<std::uint64_t>)(length, bytes.size() - from);
+				return std::vector<std::uint8_t>(bytes.begin() + from, bytes.begin() + to);
+			};
+			const auto ranged = ReadDds(reader, options); assert(ranged && ranged->levels.size() == converted->levels.size());
+			for (std::size_t level = 0; level < converted->levels.size(); ++level) {
+				assert(ranged->levels[level].rgba == converted->levels[level].rgba);
+				const auto& source = raw->levels[level + 3].rgba;
+				const auto& target = converted->levels[level].rgba;
+				for (std::size_t i = 0; i < target.size(); ++i) {
+					if ((i & 3) == 3) { assert(target[i] == source[i]); continue; }
+					const double value = static_cast<double>(source[i]) / 255.0;
+					const auto expected = std::lround((value <= 0.04045 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4)) * 0.65 * 255.0);
+					assert(std::abs(static_cast<long>(target[i]) - expected) <= 1);
+				}
+			}
+			assert(!DecodeDds(bytes, DecodeOptions{ .linearizeSrgb = true, .srgbScale = -1.0f }));
+		}
+		Image contrast(2, 1); contrast.SetTexel(0, 0, {0, 0, 0, 1}); contrast.SetTexel(1, 0, {1, 1, 1, 1});
+		MipChain single; single.levels.push_back(std::move(contrast));
+		const auto bytes = EncodeDds(single, Format::RGBA8); assert(bytes);
+		const auto converted = DecodeDds(MarkSrgb(*bytes, 29), DecodeOptions{ .linearizeSrgb = true });
+		assert(converted && Near(converted->levels.back().Texel(0, 0).x, 0.5f));
+	}
+
 	void DdsRoundTripsAndDropsLargeLevels()
 	{
 		const auto chain = BuildMips(Checker(64));
@@ -51,6 +105,12 @@ namespace
 		for (const auto format : { Format::RGBA8, Format::BC1, Format::BC3, Format::BC7 }) {
 			const auto dds = EncodeDds(chain, format, &error);
 			assert(dds && error.empty());
+			const auto inspected = InspectDds(*dds, &error);
+			assert(inspected && inspected->width == 64 && inspected->height == 64 && inspected->mipLevels == 7);
+			assert(inspected->fullMipChain && !inspected->cube && inspected->arraySize == 1);
+			assert(inspected->compressed == (format != Format::RGBA8));
+			assert(!InspectDds(std::span<const std::uint8_t>(*dds).first(dds->size() - 1), &error));
+			error.clear();
 			const auto decoded = DecodeDds(*dds, {}, &error);
 			assert(decoded && decoded->levels.size() == 7 && decoded->Width() == 64);
 			const auto texel = decoded->levels.front().Texel(1, 1);
@@ -219,6 +279,7 @@ namespace
 
 int main()
 {
+	SrgbConversionIsExplicitAndSharedByRangeReads();
 	DdsRoundTripsAndDropsLargeLevels();
 	ReadingTheKeptLevelsIsDecodingTheWholeFile();
 	BandedEncodingIsAWholeImageEncode();

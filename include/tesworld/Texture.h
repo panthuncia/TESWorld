@@ -57,9 +57,22 @@ namespace tesworld::texture
 		std::uint32_t maxSize{ 0 };
 		// For normal maps written for OpenGL (green up), as Skyrim's are: green is turned to Direct3D's convention.
 		bool flipGreen{ false };
+		// Explicit color use: decode sRGB RGB to linear before filtering; alpha and linear inputs stay unchanged.
+		bool linearizeSrgb{ false };
+		float srgbScale{ 1.0f };
 	};
 
 	[[nodiscard]] std::optional<MipChain> DecodeDds(std::span<const std::uint8_t> a_bytes, const DecodeOptions& a_options = {}, std::string* a_error = nullptr);
+
+	// Read-only metadata and complete stored-payload validation, without synthesizing mips or converting pixels.
+	// Bounded to 2D textures and single cubemaps, 16384 per side and 256 MiB of stored image data.
+	struct DdsStructure
+	{
+		std::uint32_t width{}, height{}, mipLevels{}, format{}, arraySize{}, alphaMode{};
+		bool cube{}, srgb{}, hasAlpha{}, compressed{}, fullMipChain{};
+		std::uint64_t payloadBytes{};
+	};
+	[[nodiscard]] std::optional<DdsStructure> InspectDds(std::span<const std::uint8_t> a_bytes, std::string* a_error = nullptr);
 
 	// a_length bytes from a_offset of a file (fewer at its end); none when it can't be read.
 	using ByteReader = std::function<std::optional<std::vector<std::uint8_t>>(std::uint64_t a_offset, std::uint64_t a_length)>;
