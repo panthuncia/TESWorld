@@ -92,3 +92,12 @@ sampler and vanilla RNG sequence. Both modes share ignored-record and singleton 
 `StaticWorldSnapshotBuildOptions.includeDisabledPlacements` retains initially disabled winning placements for
 consumers that classify dynamic references. It defaults to false and applies to serial and parallel bucketing;
 override resolution still happens before visibility filtering. Retained placements keep their original flags.
+
+
+### Seasonal configuration filenames
+
+`seasons::ReadSeasonsSettings` expects `DataFiles.list` to preserve original filename spelling. Seasons' swap-file
+extension, season suffix and secondary `MainFormSwap` exclusion are case-sensitive; original filenames also determine
+swap precedence. Asset/form resolution does not change its matching rules. Loose-file versus archive visibility and
+the winning overlay spelling are the consumer's responsibility. `tesworld_seasons_tests` covers filename predicates
+and ordering independently of the file provider.

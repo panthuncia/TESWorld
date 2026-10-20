@@ -51,11 +51,6 @@ namespace tesworld::seasons
 			return !std::ranges::search(a_haystack, a_needle, [](unsigned char a, unsigned char b) { return std::toupper(a) == std::toupper(b); }).empty();
 		}
 
-		bool IEndsWith(std::string_view a_text, std::string_view a_suffix)
-		{
-			return a_text.size() >= a_suffix.size() && IEquals(a_text.substr(a_text.size() - a_suffix.size()), a_suffix);
-		}
-
 		// The name and stem of a path with either slash.
 		std::string_view FileName(std::string_view a_path)
 		{
@@ -592,13 +587,13 @@ namespace tesworld::seasons
 			ParseSeasonsIni(*text, settings);
 		}
 		for (const auto& path : a_files.list("Seasons", ".ini")) {
+			if (!FileName(path).ends_with(".ini")) continue;
 			const auto stem = Stem(path);
-			if (IContains(stem, "MainFormSwap")) {
-				if (IEquals(stem, "MainFormSwap_WIN")) settings.automaticWinterFile = path;
-				continue;
-			}
+			if (IEquals(stem, "MainFormSwap_WIN")) settings.automaticWinterFile = path;
+			// Seasons' filename predicates are case-sensitive; form and INI-key matching remains independent.
+			if (path.find("MainFormSwap") != std::string_view::npos) continue;
 			for (const auto season : kSeasons) {
-				if (!IEndsWith(stem, SeasonSuffix(season))) continue;
+				if (!stem.ends_with(SeasonSuffix(season))) continue;
 				SwapFile file{ .name = std::string(FileName(path)), .season = season };
 				if (const auto text = a_files.read(path)) ParseSwapFile(*text, file);
 				settings.swapFiles.push_back(std::move(file));

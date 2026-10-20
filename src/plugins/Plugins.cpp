@@ -60,6 +60,8 @@ namespace tesworld
 		constexpr FourCC SIG_XCLW = MakeFourCC('X', 'C', 'L', 'W');
 		constexpr FourCC SIG_XSCL = MakeFourCC('X', 'S', 'C', 'L');
 		constexpr FourCC SIG_XESP = MakeFourCC('X', 'E', 'S', 'P');
+		constexpr FourCC SIG_XEMI = MakeFourCC('X', 'E', 'M', 'I');
+		constexpr FourCC SIG_REGN = MakeFourCC('R', 'E', 'G', 'N');
 		constexpr FourCC SIG_STAT = MakeFourCC('S', 'T', 'A', 'T');
 		constexpr FourCC SIG_MSTT = MakeFourCC('M', 'S', 'T', 'T');
 		constexpr FourCC SIG_TREE = MakeFourCC('T', 'R', 'E', 'E');
@@ -400,7 +402,7 @@ namespace tesworld
 				       a_subrecordSignature == SIG_VTXT;
 			}
 			if (a_recordSignature == SIG_REFR || a_recordSignature == SIG_ACHR) {
-				return a_subrecordSignature == SIG_NAME || a_subrecordSignature == SIG_DATA || a_subrecordSignature == SIG_XSCL || a_subrecordSignature == SIG_XESP;
+				return a_subrecordSignature == SIG_NAME || a_subrecordSignature == SIG_DATA || a_subrecordSignature == SIG_XSCL || a_subrecordSignature == SIG_XESP || a_subrecordSignature == SIG_XEMI;
 			}
 			return false;
 		}
@@ -1266,6 +1268,8 @@ namespace tesworld
 				info.enableParent = ConvertRecordLocalFormID(FormID{ ReadLE<std::uint32_t>(bytes, 0) }, a_record);
 				info.enableParentFlags = ReadLE<std::uint32_t>(bytes, 4);
 			}
+			if (const auto* xemi = FindSubrecord(a_record, SIG_XEMI); xemi && xemi->size >= 4)
+				info.emittance = ConvertRecordLocalFormID(FormID{ReadLE<std::uint32_t>(SubrecordData(a_record, *xemi), 0)}, a_record);
 			return info;
 		}
 
@@ -1627,6 +1631,8 @@ namespace tesworld
 				} else if (subrecord.signature == SIG_XESP && payload.size() >= 8) {
 					info.enableParent = ConvertContextLocalFormID(FormID{ ReadLE<std::uint32_t>(payload, 0) }, a_sourceFileID, a_sourceMasterFileIDs);
 					info.enableParentFlags = ReadLE<std::uint32_t>(payload, 4);
+				} else if (subrecord.signature == SIG_XEMI && payload.size() >= 4) {
+					info.emittance = ConvertContextLocalFormID(FormID{ReadLE<std::uint32_t>(payload, 0)}, a_sourceFileID, a_sourceMasterFileIDs);
 				}
 			}
 
@@ -1660,7 +1666,7 @@ namespace tesworld
 			++a_shard.stats.recordsScanned;
 
 			const auto needsTypedPayload =
-				header.signature == SIG_MATO ||
+				header.signature == SIG_MATO || header.signature == SIG_REGN ||
 				header.signature == SIG_MATT ||
 				header.signature == SIG_WRLD ||
 				header.signature == SIG_CELL ||
@@ -1728,7 +1734,7 @@ namespace tesworld
 			a_shard.stats.uncompressedRecordBytes += recordData.size();
 			++a_shard.stats.typedRecords;
 
-			if (header.signature == SIG_MATO) {
+			if (header.signature == SIG_MATO || header.signature == SIG_REGN) {
 				EditorIDInfo info{ .formID = loadOrderFormID };
 				SubrecordCursor cursor(recordData);
 				RawSubrecord subrecord{};
@@ -1739,7 +1745,7 @@ namespace tesworld
 						break;
 					}
 				}
-				a_shard.materialObjects.push_back(std::move(info));
+				(header.signature == SIG_REGN ? a_shard.regions : a_shard.materialObjects).push_back(std::move(info));
 			} else if (header.signature == SIG_MATT) {
 				MaterialTypeInfo info{ .formID = loadOrderFormID };
 				SubrecordCursor cursor(recordData);
@@ -1917,6 +1923,7 @@ namespace tesworld
 			reserve(&StaticPluginShard::grasses);
 			reserve(&StaticPluginShard::worlds);
 			reserve(&StaticPluginShard::materialObjects);
+			reserve(&StaticPluginShard::regions);
 			reserve(&StaticPluginShard::materialTypes);
 			reserve(&StaticPluginShard::cells);
 			reserve(&StaticPluginShard::lands);
@@ -1933,6 +1940,7 @@ namespace tesworld
 			move(a_to.grasses, a_from.grasses);
 			move(a_to.worlds, a_from.worlds);
 			move(a_to.materialObjects, a_from.materialObjects);
+			move(a_to.regions, a_from.regions);
 			move(a_to.materialTypes, a_from.materialTypes);
 			move(a_to.cells, a_from.cells);
 			move(a_to.lands, a_from.lands);
@@ -3467,6 +3475,8 @@ namespace tesworld
 					snapshot.materialObjectsByFormID.insert_or_assign(material.formID, material.editorID);
 				}
 			}
+			for (const auto& region : shard.regions)
+				if (!region.formID.IsNull() && !region.formID.IsNone()) snapshot.regionsByFormID.insert_or_assign(region.formID, region.editorID);
 			for (const auto& material : shard.materialTypes) {
 				if (!material.formID.IsNull() && !material.formID.IsNone()) {
 					snapshot.materialTypesByFormID.insert_or_assign(material.formID, material);
@@ -3517,6 +3527,8 @@ namespace tesworld
 					snapshot.worldsByFormID.erase(suppressor.formID);
 				} else if (suppressor.signature == SIG_MATO) {
 					snapshot.materialObjectsByFormID.erase(suppressor.formID);
+				} else if (suppressor.signature == SIG_REGN) {
+					snapshot.regionsByFormID.erase(suppressor.formID);
 				} else if (suppressor.signature == SIG_MATT) {
 					snapshot.materialTypesByFormID.erase(suppressor.formID);
 				} else if (suppressor.signature == SIG_CELL) {
