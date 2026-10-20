@@ -2,6 +2,7 @@
 
 #include "tesworld/Math.h"
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -62,7 +63,21 @@ namespace tesworld::texture
 		float srgbScale{ 1.0f };
 	};
 
+	// How a long encode or decode may be stopped from another thread.
+	struct EncodeOptions
+	{
+		// Once set, the work stops at its next band of block rows (or level) and gives nothing, with the error "cancelled".
+		// Bands that run to the end are the bytes an uncancelled call gives.
+		const std::atomic<bool>* cancel{ nullptr };
+	};
+
+	// The error a cancelled EncodeDds, EncodeBlocks or DecodeDds gives.
+	inline constexpr const char* kCancelledError = "cancelled";
+
 	[[nodiscard]] std::optional<MipChain> DecodeDds(std::span<const std::uint8_t> a_bytes, const DecodeOptions& a_options = {}, std::string* a_error = nullptr);
+	// DecodeDds checking a_control.cancel between bands of block rows and levels.
+	[[nodiscard]] std::optional<MipChain> DecodeDds(std::span<const std::uint8_t> a_bytes, const DecodeOptions& a_options, const EncodeOptions& a_control,
+		std::string* a_error = nullptr);
 
 	// Read-only metadata and complete stored-payload validation, without synthesizing mips or converting pixels.
 	// Bounded to 2D textures and single cubemaps, 16384 per side and 256 MiB of stored image data.
@@ -101,9 +116,14 @@ namespace tesworld::texture
 	};
 
 	[[nodiscard]] std::optional<std::vector<std::uint8_t>> EncodeDds(const MipChain& a_chain, Format a_format, std::string* a_error = nullptr);
+	// EncodeDds checking a_options.cancel before each band of block rows and each level.
+	[[nodiscard]] std::optional<std::vector<std::uint8_t>> EncodeDds(const MipChain& a_chain, Format a_format, const EncodeOptions& a_options,
+		std::string* a_error = nullptr);
 	// A chain's blocks in a block format, laid out as EncodeDdsBlocks takes them: each level's rows of blocks in turn.
 	// Levels are encoded in bands of block rows across the cores, with the bytes a whole-image encode gives.
 	[[nodiscard]] std::optional<std::vector<std::uint8_t>> EncodeBlocks(const MipChain& a_chain, Format a_format, std::string* a_error = nullptr);
+	[[nodiscard]] std::optional<std::vector<std::uint8_t>> EncodeBlocks(const MipChain& a_chain, Format a_format, const EncodeOptions& a_options,
+		std::string* a_error = nullptr);
 	// A DDS around blocks already encoded (a GPU's): a_mipCount levels from a_width x a_height down, each level's rows of
 	// 4x4 blocks in turn (at least one block a side). The header is the one EncodeDds writes for the same image.
 	[[nodiscard]] std::optional<std::vector<std::uint8_t>> EncodeDdsBlocks(std::uint32_t a_width, std::uint32_t a_height, std::uint32_t a_mipCount, Format a_format,

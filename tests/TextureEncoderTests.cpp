@@ -6,6 +6,7 @@
 #include "tesworld/TextureEncoderGpu.h"
 #endif
 
+#include <atomic>
 #include <cassert>
 #include <cmath>
 #include <cstdlib>
@@ -83,6 +84,21 @@ namespace
 		assert(!EncodeNow(*encoder, MipChain{}, Format::BC7).Ok());
 	}
 
+	// A request cancelled before it's encoded calls back cancelled; one whose flag stays clear is encoded as ever.
+	void CancelledRequestsCallBackCancelled(TextureEncoder& a_encoder)
+	{
+		const auto chain = AtlasLike(300, 200, 5, true);
+		const std::atomic<bool> already{ true }, never{ false };
+		for (const auto format : { Format::BC1, Format::BC7 }) {
+			EncodeResult cancelled, kept;
+			a_encoder.Encode({ chain, format, EncodeOptions{ .cancel = &already } }, [&](EncodeResult a_result) { cancelled = std::move(a_result); });
+			a_encoder.Encode({ chain, format, EncodeOptions{ .cancel = &never } }, [&](EncodeResult a_result) { kept = std::move(a_result); });
+			a_encoder.Wait();
+			assert(!cancelled.Ok() && cancelled.error == kCancelledError && cancelled.dds.empty());
+			assert(kept.Ok() && kept.dds == EncodeNow(a_encoder, chain, format).dds);
+		}
+	}
+
 #if defined(TESWORLD_TEST_GPU)
 	void SetFailAfter(const char* a_frames)
 	{
@@ -133,6 +149,7 @@ namespace
 			for (std::size_t i = 0; i < chains.size(); ++i) {
 				assert(results[i].Ok() && results[i].dds == EncodeNow(*gpu, chains[i], Format::BC7).dds);
 			}
+			CancelledRequestsCallBackCancelled(*gpu);
 			assert(gpu->Problem().empty());
 		} catch (const gpu::UnsupportedError& e) {
 			std::cout << "no GPU, its tests skipped: " << e.what() << '\n';
@@ -174,6 +191,7 @@ namespace
 int main()
 {
 	CpuEncoderIsEncodeDds();
+	CancelledRequestsCallBackCancelled(*CreateCpuTextureEncoder());
 #if defined(TESWORLD_TEST_GPU)
 	GpuEncoderMatchesTheCpusQuality();
 	AFailingGpuHandsItsWorkToTheCpu();

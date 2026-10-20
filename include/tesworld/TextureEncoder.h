@@ -17,6 +17,9 @@ namespace tesworld::texture
 	{
 		MipChain chain;
 		Format format{ Format::BC7 };
+		// Once set, a request not yet encoded calls back with the error "cancelled" (kCancelledError): the CPU stops at its
+		// next band of block rows, the GPU before the request's frame is dispatched (one already dispatched completes).
+		EncodeOptions options{};
 	};
 
 	struct EncodeResult

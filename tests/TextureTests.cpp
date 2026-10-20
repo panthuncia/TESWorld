@@ -5,12 +5,16 @@
 #include "tesworld/Texture.h"
 
 #include <array>
+#include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstring>
+#include <future>
 #include <iostream>
 #include <optional>
 #include <random>
+#include <thread>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -202,6 +206,84 @@ namespace
 		}
 	}
 
+	// Banded decoding is DirectXTex decompressing each level whole.
+	void BandedDecodingIsAWholeLevelDecode()
+	{
+		std::mt19937 random(9);
+		Image base(1030, 600);
+		for (auto& byte : base.rgba) byte = static_cast<std::uint8_t>(random() & 0xFF);
+		const auto chain = BuildMips(std::move(base));
+		for (const auto format : { Format::BC1, Format::BC3, Format::BC5, Format::BC7 }) {
+			const auto dds = EncodeDds(chain, format);
+			assert(dds);
+			DirectX::TexMetadata metadata{};
+			DirectX::ScratchImage scratch;
+			assert(SUCCEEDED(DirectX::LoadFromDDSMemory(dds->data(), dds->size(), DirectX::DDS_FLAGS_NONE, &metadata, scratch)));
+			const std::atomic<bool> never{ false };
+			const auto decoded = DecodeDds(*dds, {}, EncodeOptions{ .cancel = &never });
+			assert(decoded && decoded->levels.size() == metadata.mipLevels);
+			for (std::size_t level = 0; level < metadata.mipLevels; ++level) {
+				DirectX::ScratchImage whole;
+				assert(SUCCEEDED(DirectX::Decompress(*scratch.GetImage(level, 0, 0), DXGI_FORMAT_R8G8B8A8_UNORM, whole)));
+				const auto* image = whole.GetImage(0, 0, 0);
+				const auto& kept = decoded->levels[level];
+				for (std::uint32_t y = 0; y < kept.height; ++y) {
+					assert(std::memcmp(kept.rgba.data() + static_cast<std::size_t>(y) * kept.width * 4, image->pixels + y * image->rowPitch, kept.width * 4u) == 0);
+				}
+			}
+			const auto plain = DecodeDds(*dds);
+			for (std::size_t level = 0; level < plain->levels.size(); ++level) assert(plain->levels[level].rgba == decoded->levels[level].rgba);
+		}
+	}
+
+	// A cancel stops an encode or decode at its next band and gives nothing; one never set changes no byte.
+	void CancellingStopsWithinABand()
+	{
+		std::mt19937 random(11);
+		Image base(4096, 4096);
+		for (auto& byte : base.rgba) byte = static_cast<std::uint8_t>(random() & 0xFF);
+		const auto chain = BuildMips(std::move(base));
+
+		const std::atomic<bool> never{ false };
+		const std::atomic<bool> already{ true };
+		std::string error;
+		assert(!EncodeDds(chain, Format::BC7, EncodeOptions{ .cancel = &already }, &error) && error == kCancelledError);
+		error.clear();
+		assert(!EncodeBlocks(chain, Format::BC1, EncodeOptions{ .cancel = &already }, &error) && error == kCancelledError);
+		error.clear();
+		assert(!EncodeDds(chain, Format::RGBA8, EncodeOptions{ .cancel = &already }, &error) && error == kCancelledError);
+
+		const auto whole = EncodeDds(chain, Format::BC1);
+		assert(whole && *whole == *EncodeDds(chain, Format::BC1, EncodeOptions{ .cancel = &never }));
+		error.clear();
+		assert(!DecodeDds(*whole, {}, EncodeOptions{ .cancel = &already }, &error) && error == kCancelledError);
+
+		// One band's time: 8 block rows of the top level (128K texels), encoded alone. BC3: BC7 of noise is slow.
+		Image bandImage(4096, 32);
+		std::copy_n(chain.levels.front().rgba.begin(), bandImage.rgba.size(), bandImage.rgba.begin());
+		MipChain band;
+		band.levels.push_back(std::move(bandImage));
+		const auto bandStart = std::chrono::steady_clock::now();
+		assert(EncodeBlocks(band, Format::BC3));
+		const auto bandTime = std::chrono::steady_clock::now() - bandStart;
+
+		std::atomic<bool> cancel{ false };
+		auto encoding = std::async(std::launch::async, [&] {
+			std::string message;
+			const auto result = EncodeDds(chain, Format::BC3, EncodeOptions{ .cancel = &cancel }, &message);
+			return !result && message == kCancelledError;
+		});
+		std::this_thread::sleep_for(bandTime / 2);
+		const auto cancelled = std::chrono::steady_clock::now();
+		cancel = true;
+		assert(encoding.get());
+		const auto latency = std::chrono::steady_clock::now() - cancelled;
+		std::cout << "BC3 4096x4096 cancel: " << std::chrono::duration<double, std::milli>(latency).count() << " ms (a band "
+		          << std::chrono::duration<double, std::milli>(bandTime).count() << " ms)\n";
+		// The bands running finish, side by side; none starts after.
+		assert(latency < bandTime * 3 + std::chrono::milliseconds(100));
+	}
+
 	void SamplingWrapsAndPicksLevels()
 	{
 		const auto chain = BuildMips(Checker(64));
@@ -283,6 +365,8 @@ int main()
 	DdsRoundTripsAndDropsLargeLevels();
 	ReadingTheKeptLevelsIsDecodingTheWholeFile();
 	BandedEncodingIsAWholeImageEncode();
+	BandedDecodingIsAWholeLevelDecode();
+	CancellingStopsWithinABand();
 	SamplingWrapsAndPicksLevels();
 	AlphaCoverageHoldsDownTheChain();
 	DilateFillsPadding();

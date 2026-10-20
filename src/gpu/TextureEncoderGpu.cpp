@@ -111,7 +111,8 @@ namespace tesworld::texture
 			bool Pump() override
 			{
 				auto& waiting = _queue.Waiting();
-				if (waiting.empty()) return false;
+				const bool dropped = DropCancelled(waiting);
+				if (waiting.empty()) return dropped;
 				auto* frame = _queue.AcquireFrame();
 				if (!frame) return false;
 				TakeFrame(*frame, waiting);
@@ -122,6 +123,35 @@ namespace tesworld::texture
 			void Fail(const std::string& a_reason) override { _queue.Fail(a_reason); }
 
 		private:
+			static bool Cancelled(const Job& a_job)
+			{
+				const auto* cancel = a_job.request.options.cancel;
+				return cancel && cancel->load(std::memory_order_relaxed);
+			}
+
+			// Calls back the jobs cancelled before their frame, in a task each; true when there were any.
+			bool DropCancelled(std::deque<Job>& a_waiting)
+			{
+				const auto before = a_waiting.size();
+				for (auto it = a_waiting.begin(); it != a_waiting.end();) {
+					if (!Cancelled(*it)) {
+						++it;
+						continue;
+					}
+					FinishCancelled(std::move(it->done));
+					it = a_waiting.erase(it);
+				}
+				return a_waiting.size() != before;
+			}
+
+			void FinishCancelled(Callback a_done)
+			{
+				_queue.Run([this, done = std::move(a_done)] {
+					done(EncodeResult{ .error = kCancelledError });
+					_queue.Finished();
+				});
+			}
+
 			// Takes chains in order into the frame, places them and copies their levels into its upload buffer.
 			void TakeFrame(FrameSet& a_frame, std::deque<Job>& a_waiting)
 			{
@@ -162,6 +192,10 @@ namespace tesworld::texture
 			{
 				TW_ZONE("GPU texture frame complete");
 				for (auto& placed : a_frame.placed) {
+					if (Cancelled(placed.job)) {
+						FinishCancelled(std::move(placed.job.done));
+						continue;
+					}
 					auto bytes = ImagePrograms::Read(a_frame.buffers, placed.image);
 					// The chain was only kept for the CPU, had the GPU failed.
 					_queue.Run([this, done = std::move(placed.job.done), image = std::move(placed.image), bytes = std::move(bytes)] {

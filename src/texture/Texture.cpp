@@ -174,37 +174,71 @@ namespace tesworld::texture
 		// A texture's chain from its levels (a_level, by index; null for one not read): those a_options.maxSize lets through,
 		// else its smallest shrunk to fit; a single level mipped.
 		std::optional<MipChain> ChainOf(const DirectX::TexMetadata& a_metadata, const std::function<const DirectX::Image*(std::size_t)>& a_level,
-			const DecodeOptions& a_options, std::string* a_error)
+			const DecodeOptions& a_options, const std::atomic<bool>* a_cancel, std::string* a_error)
 		{
 			const auto fail = [&](const char* a_message) -> std::optional<MipChain> {
 				if (a_error) *a_error = a_message;
 				return std::nullopt;
 			};
+			bool cancelled = false;
+			const auto stop = [&] {
+				if (a_cancel && a_cancel->load(std::memory_order_relaxed)) cancelled = true;
+				return cancelled;
+			};
 			MipChain chain;
 			chain.hasAlpha = DirectX::HasAlpha(a_metadata.format) && DirectX::MakeLinear(a_metadata.format) != DXGI_FORMAT_BC1_UNORM;
 			if (!std::isfinite(a_options.srgbScale) || a_options.srgbScale < 0.0f || a_options.srgbScale > 4.0f)
 				return fail("sRGB conversion scale is outside 0..4");
+			const bool linearize = a_options.linearizeSrgb && DirectX::IsSRGB(a_metadata.format);
+			// Texels [a_begin, a_end) of a decoded image to linear.
+			const auto linearizeTexels = [&](Image& a_image, std::size_t a_begin, std::size_t a_end) {
+				for (std::size_t i = a_begin; i < a_end; ++i) {
+					if ((i & 3) == 3) continue;
+					const float value = static_cast<float>(a_image.rgba[i]) / 255.0f;
+					const float linear = value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
+					a_image.rgba[i] = ToByte(linear * a_options.srgbScale);
+				}
+			};
+			// In bands of block rows, so a cancel waits for one band; a block decodes from its own bytes alone, so the texels
+			// are a whole-level decode's.
+			constexpr std::uint32_t kBandRows = 256;
 			const auto convert = [&](const DirectX::Image& a_source) -> std::optional<Image> {
+				if (stop()) return std::nullopt;
 				// Work on stored samples first; DirectXTex format-dependent implicit conversions must not affect data textures.
 				auto stored = a_source;
 				stored.format = DirectX::MakeLinear(stored.format);
-				DirectX::ScratchImage converted;
 				std::optional<Image> image;
+				if (DirectX::IsCompressed(stored.format)) {
+					image.emplace(static_cast<std::uint32_t>(stored.width), static_cast<std::uint32_t>(stored.height));
+					const auto rowBytes = static_cast<std::size_t>(image->width) * 4;
+					for (std::uint32_t top = 0; top < image->height; top += kBandRows) {
+						if (stop()) return std::nullopt;
+						const auto height = (std::min)(kBandRows, image->height - top);
+						auto band = stored;
+						band.height = height;
+						band.slicePitch = stored.rowPitch * ((height + 3) / 4);
+						band.pixels = stored.pixels + stored.rowPitch * (top / 4);
+						DirectX::ScratchImage converted;
+						if (FAILED(DirectX::Decompress(band, DXGI_FORMAT_R8G8B8A8_UNORM, converted)) || !converted.GetImage(0, 0, 0)) return std::nullopt;
+						const auto decoded = FromDirectXImage(*converted.GetImage(0, 0, 0), a_options.flipGreen);
+						std::memcpy(image->rgba.data() + top * rowBytes, decoded.rgba.data(), decoded.rgba.size());
+						if (linearize) linearizeTexels(*image, top * rowBytes, top * rowBytes + decoded.rgba.size());
+					}
+					return image;
+				}
+				DirectX::ScratchImage converted;
 				if (stored.format == DXGI_FORMAT_R8G8B8A8_UNORM) {
 					image = FromDirectXImage(stored, a_options.flipGreen);
 				} else {
-					const auto result = DirectX::IsCompressed(stored.format)
-						? DirectX::Decompress(stored, DXGI_FORMAT_R8G8B8A8_UNORM, converted)
-						: DirectX::Convert(stored, DXGI_FORMAT_R8G8B8A8_UNORM, DirectX::TEX_FILTER_FORCE_NON_WIC, DirectX::TEX_THRESHOLD_DEFAULT, converted);
+					const auto result = DirectX::Convert(stored, DXGI_FORMAT_R8G8B8A8_UNORM, DirectX::TEX_FILTER_FORCE_NON_WIC, DirectX::TEX_THRESHOLD_DEFAULT, converted);
 					if (FAILED(result) || !converted.GetImage(0, 0, 0)) return std::nullopt;
 					image = FromDirectXImage(*converted.GetImage(0, 0, 0), a_options.flipGreen);
 				}
-				if (a_options.linearizeSrgb && DirectX::IsSRGB(a_metadata.format)) {
-					for (std::size_t i = 0; i < image->rgba.size(); ++i) {
-						if ((i & 3) == 3) continue;
-						const float value = static_cast<float>(image->rgba[i]) / 255.0f;
-						const float linear = value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
-						image->rgba[i] = ToByte(linear * a_options.srgbScale);
+				if (linearize) {
+					const auto bandBytes = static_cast<std::size_t>(image->width) * 4 * kBandRows;
+					for (std::size_t begin = 0; begin < image->rgba.size(); begin += bandBytes) {
+						if (stop()) return std::nullopt;
+						linearizeTexels(*image, begin, (std::min)(image->rgba.size(), begin + bandBytes));
 					}
 				}
 				return image;
@@ -220,7 +254,7 @@ namespace tesworld::texture
 				}
 				auto image = convert(*source);
 				if (!image) {
-					return fail("can't decode the DDS's format");
+					return fail(cancelled ? kCancelledError : "can't decode the DDS's format");
 				}
 				chain.levels.push_back(std::move(*image));
 			}
@@ -230,7 +264,7 @@ namespace tesworld::texture
 				const auto* source = a_level(a_metadata.mipLevels - 1);
 				auto image = source ? convert(*source) : std::nullopt;
 				if (!image) {
-					return fail("can't decode the DDS's format");
+					return fail(cancelled ? kCancelledError : "can't decode the DDS's format");
 				}
 				const float scale = static_cast<float>(a_options.maxSize) / static_cast<float>((std::max)(image->width, image->height));
 				auto resized = Resize(*image, (std::max)(1u, static_cast<std::uint32_t>(image->width * scale)), (std::max)(1u, static_cast<std::uint32_t>(image->height * scale)));
@@ -239,17 +273,28 @@ namespace tesworld::texture
 				return mips;
 			}
 			if (chain.levels.size() == 1 && (chain.levels.front().width > 1 || chain.levels.front().height > 1)) {
+				if (stop()) return fail(kCancelledError);
 				const bool hasAlpha = chain.hasAlpha;
 				chain = BuildMips(std::move(chain.levels.front()));
 				chain.hasAlpha = hasAlpha;
 			}
+			if (stop()) return fail(kCancelledError);
 			return chain;
 		}
 	}
 
 	std::optional<MipChain> DecodeDds(std::span<const std::uint8_t> a_bytes, const DecodeOptions& a_options, std::string* a_error)
 	{
+		return DecodeDds(a_bytes, a_options, EncodeOptions{}, a_error);
+	}
+
+	std::optional<MipChain> DecodeDds(std::span<const std::uint8_t> a_bytes, const DecodeOptions& a_options, const EncodeOptions& a_control, std::string* a_error)
+	{
 		TW_ZONE("DecodeDds");
+		if (a_control.cancel && a_control.cancel->load(std::memory_order_relaxed)) {
+			if (a_error) *a_error = kCancelledError;
+			return std::nullopt;
+		}
 		DirectX::TexMetadata metadata{};
 		DirectX::ScratchImage scratch;
 		if (FAILED(DirectX::LoadFromDDSMemory(a_bytes.data(), a_bytes.size(), DirectX::DDS_FLAGS_NONE, &metadata, scratch))) {
@@ -260,7 +305,7 @@ namespace tesworld::texture
 			if (a_error) *a_error = "not a 2D texture";
 			return std::nullopt;
 		}
-		return ChainOf(metadata, [&](std::size_t a_level) { return scratch.GetImage(a_level, 0, 0); }, a_options, a_error);
+		return ChainOf(metadata, [&](std::size_t a_level) { return scratch.GetImage(a_level, 0, 0); }, a_options, a_control.cancel, a_error);
 	}
 
 	std::optional<MipChain> ReadDds(const ByteReader& a_read, const DecodeOptions& a_options, std::string* a_error)
@@ -322,7 +367,7 @@ namespace tesworld::texture
 			images[i] = DirectX::Image{ .width = levels[i].width, .height = levels[i].height, .format = metadata.format, .rowPitch = levels[i].rowPitch,
 				.slicePitch = levels[i].slicePitch, .pixels = const_cast<std::uint8_t*>(tail->data() + (levels[i].offset - levels[first].offset)) };
 		}
-		return ChainOf(metadata, [&](std::size_t a_level) { return a_level >= first ? &images[a_level] : nullptr; }, a_options, a_error);
+		return ChainOf(metadata, [&](std::size_t a_level) { return a_level >= first ? &images[a_level] : nullptr; }, a_options, nullptr, a_error);
 	}
 
 	void PreserveAlphaCoverage(Image& a_image, float a_threshold, float a_target, float a_maxScale)
@@ -374,11 +419,18 @@ namespace tesworld::texture
 
 	std::optional<std::vector<std::uint8_t>> EncodeBlocks(const MipChain& a_chain, Format a_format, std::string* a_error)
 	{
+		return EncodeBlocks(a_chain, a_format, EncodeOptions{}, a_error);
+	}
+
+	std::optional<std::vector<std::uint8_t>> EncodeBlocks(const MipChain& a_chain, Format a_format, const EncodeOptions& a_options, std::string* a_error)
+	{
 		TW_ZONE_TEXT("EncodeBlocks", "{}x{}", a_chain.Width(), a_chain.Height());
 		const auto fail = [&](const char* a_message) -> std::optional<std::vector<std::uint8_t>> {
 			if (a_error) *a_error = a_message;
 			return std::nullopt;
 		};
+		const auto stop = [&] { return a_options.cancel && a_options.cancel->load(std::memory_order_relaxed); };
+		if (stop()) return fail(kCancelledError);
 		if (a_chain.Empty()) {
 			return fail("no image");
 		}
@@ -386,8 +438,10 @@ namespace tesworld::texture
 			return fail("not a block-compressed format");
 		}
 		// Each level in bands of whole block rows, compressed side by side: a block is encoded from its own texels alone,
-		// so the bytes are a whole level's.
-		constexpr std::uint32_t kBandRows = 64;
+		// so the bytes are a whole level's. A band is about 128K texels (4 block rows at 8192 wide, 64 at 512): a cancel waits
+		// for the bands running, about half a second of BC7.
+		constexpr std::uint32_t kBandTexels = 1u << 17;
+		constexpr std::uint32_t kMaxBandRows = 64;
 		struct Band
 		{
 			std::size_t level;
@@ -407,15 +461,22 @@ namespace tesworld::texture
 			}
 			const auto rowBytes = BlockBytes(image.width, 1, a_format);
 			const auto rows = (std::max)(1u, (image.height + 3) / 4);
-			for (std::uint32_t row = 0; row < rows; row += kBandRows) {
-				const auto count = (std::min)(kBandRows, rows - row);
+			const auto bandRows = std::clamp(kBandTexels / (std::max)(1u, image.width * 4), 1u, kMaxBandRows);
+			for (std::uint32_t row = 0; row < rows; row += bandRows) {
+				const auto count = (std::min)(bandRows, rows - row);
 				bands.push_back({ level, row, count, total + row * rowBytes });
 			}
 			total += rowBytes * rows;
 		}
 		std::vector<std::uint8_t> blocks(total);
 		std::atomic<bool> failed{ false };
+		std::atomic<bool> cancelled{ false };
 		oneapi::tbb::parallel_for(std::size_t{ 0 }, bands.size(), [&](std::size_t a_band) {
+			// Each band checks, so a cancel waits for the bands running (a level's last bands are its mips').
+			if (cancelled.load(std::memory_order_relaxed) || stop()) {
+				cancelled.store(true, std::memory_order_relaxed);
+				return;
+			}
 			const auto& band = bands[a_band];
 			const auto& image = a_chain.levels[band.level];
 			const auto top = band.firstRow * 4;
@@ -443,6 +504,9 @@ namespace tesworld::texture
 				std::memcpy(blocks.data() + band.offset + row * rowBytes, out->pixels + row * out->rowPitch, rowBytes);
 			}
 		});
+		if (cancelled || stop()) {
+			return fail(kCancelledError);
+		}
 		if (failed) {
 			return fail("block compression failed");
 		}
@@ -451,24 +515,35 @@ namespace tesworld::texture
 
 	std::optional<std::vector<std::uint8_t>> EncodeDds(const MipChain& a_chain, Format a_format, std::string* a_error)
 	{
+		return EncodeDds(a_chain, a_format, EncodeOptions{}, a_error);
+	}
+
+	std::optional<std::vector<std::uint8_t>> EncodeDds(const MipChain& a_chain, Format a_format, const EncodeOptions& a_options, std::string* a_error)
+	{
 		TW_ZONE_TEXT("EncodeDds", "{}x{}", a_chain.Width(), a_chain.Height());
 		const auto fail = [&](const char* a_message) -> std::optional<std::vector<std::uint8_t>> {
 			if (a_error) *a_error = a_message;
 			return std::nullopt;
 		};
+		const auto stop = [&] { return a_options.cancel && a_options.cancel->load(std::memory_order_relaxed); };
+		if (stop()) return fail(kCancelledError);
 		if (a_chain.Empty()) {
 			return fail("no image");
 		}
 		if (a_format != Format::RGBA8) {
-			const auto blocks = EncodeBlocks(a_chain, a_format, a_error);
+			auto blocks = EncodeBlocks(a_chain, a_format, a_options, a_error);
 			if (!blocks) return std::nullopt;
-			return EncodeDdsBlocks(a_chain.Width(), a_chain.Height(), static_cast<std::uint32_t>(a_chain.levels.size()), a_format, *blocks, a_error);
+			if (stop()) return fail(kCancelledError);
+			auto dds = EncodeDdsBlocks(a_chain.Width(), a_chain.Height(), static_cast<std::uint32_t>(a_chain.levels.size()), a_format, *blocks, a_error);
+			if (dds && stop()) return fail(kCancelledError);
+			return dds;
 		}
 		DirectX::ScratchImage source;
 		if (FAILED(source.Initialize2D(DXGI_FORMAT_R8G8B8A8_UNORM, a_chain.Width(), a_chain.Height(), 1, a_chain.levels.size()))) {
 			return fail("can't allocate the image");
 		}
 		for (std::size_t level = 0; level < a_chain.levels.size(); ++level) {
+			if (stop()) return fail(kCancelledError);
 			const auto& from = a_chain.levels[level];
 			const auto* to = source.GetImage(level, 0, 0);
 			if (!to || to->width != from.width || to->height != from.height) {

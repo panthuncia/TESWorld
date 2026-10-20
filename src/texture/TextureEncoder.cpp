@@ -23,7 +23,7 @@ namespace tesworld::texture
 					TW_ZONE("CPU texture encode");
 					EncodeResult result;
 					std::string error;
-					auto dds = EncodeDds(request->chain, request->format, &error);
+					auto dds = EncodeDds(request->chain, request->format, request->options, &error);
 					// The chain's memory goes now, not when the task does.
 					request->chain = {};
 					if (dds) {
