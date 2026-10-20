@@ -159,5 +159,24 @@ void GrassLoadingPolicy() {
     assert(snapshot.cellsByFormID.at(cell).gridX == -2);
 }
 
+// A destructible base: DEST, and each stage's model damage stage with its replacement model when it has one.
+void DestructionStagesAndModels() {
+    Fixture fixture;
+    const auto stage = [](std::uint8_t damage) { Bytes data(20, 0); data[0] = 50; data[2] = damage; return data; };
+    const auto text = [](const char* s) { Bytes data(s, s + std::char_traits<char>::length(s)); data.push_back(0); return data; };
+    Bytes payload; Sub(payload, "EDID", text("Hive")); Sub(payload, "MODL", text("clutter/hive.nif"));
+    Sub(payload, "DEST", Bytes(8, 0));
+    Sub(payload, "DSTD", stage(1)); Sub(payload, "DSTF", {});
+    Sub(payload, "DSTD", stage(4)); Sub(payload, "DMDL", text("clutter/hiveburned.nif")); Sub(payload, "DSTF", {});
+    Bytes plugin; Record(plugin, "TES4", 0, 0, {}); Record(plugin, "ACTI", 0x800, 0, payload);
+    { std::ofstream out(fixture.path, std::ios::binary); out.write(reinterpret_cast<const char*>(plugin.data()), static_cast<std::streamsize>(plugin.size())); }
+    const std::vector<LoadOrderEntry> order{ LoadOrderEntry{ .path=fixture.path, .pluginName="hive.esp" } };
+    const auto shard = PluginParser{}.ParseStaticWorldShard(order[0], 0, order);
+    assert(shard.baseObjects.size() == 1);
+    const auto& base = shard.baseObjects[0];
+    assert(base.destructible && base.modelPath == "clutter/hive.nif");
+    assert(base.destructionModels.size() == 1 && base.destructionModels[0].stage == 4 && base.destructionModels[0].modelPath == "clutter/hiveburned.nif");
 }
-int main() { CellFieldsAndCompleteInflation(); IgnoredIsNotDeleted(); CellHasOneLandSlot(); GrassLoadingPolicy(); std::cout << "tesworld reader regressions passed\n"; }
+
+}
+int main() { CellFieldsAndCompleteInflation(); IgnoredIsNotDeleted(); CellHasOneLandSlot(); GrassLoadingPolicy(); DestructionStagesAndModels(); std::cout << "tesworld reader regressions passed\n"; }

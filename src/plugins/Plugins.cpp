@@ -87,6 +87,9 @@ namespace tesworld
 		constexpr FourCC SIG_TX06 = MakeFourCC('T', 'X', '0', '6');
 		constexpr FourCC SIG_TX07 = MakeFourCC('T', 'X', '0', '7');
 		constexpr FourCC SIG_DNAM = MakeFourCC('D', 'N', 'A', 'M');
+		constexpr FourCC SIG_DEST = MakeFourCC('D', 'E', 'S', 'T');
+		constexpr FourCC SIG_DSTD = MakeFourCC('D', 'S', 'T', 'D');
+		constexpr FourCC SIG_DMDL = MakeFourCC('D', 'M', 'D', 'L');
 		constexpr FourCC SIG_HNAM = MakeFourCC('H', 'N', 'A', 'M');
 		constexpr FourCC SIG_GNAM = MakeFourCC('G', 'N', 'A', 'M');
 		constexpr FourCC SIG_TNAM = MakeFourCC('T', 'N', 'A', 'M');
@@ -373,6 +376,9 @@ namespace tesworld
 				       a_subrecordSignature == SIG_DNAM ||
 				       a_subrecordSignature == SIG_MODL ||
 				       a_subrecordSignature == SIG_MNAM ||
+				       a_subrecordSignature == SIG_DEST ||
+				       a_subrecordSignature == SIG_DSTD ||
+				       a_subrecordSignature == SIG_DMDL ||
 				       IsModelTextureSwapSubrecord(a_subrecordSignature);
 			}
 			if (a_recordSignature == SIG_TXST) {
@@ -847,6 +853,19 @@ namespace tesworld
 		}
 
 		// A static collection's DATA after an ONAM: its part's placements, 28 bytes each (position, rotation, scale).
+		// Destruction data: DEST, then per stage a DSTD (its model damage stage at byte 2) and, for a replacement model, a DMDL.
+		void ReadDestruction(BaseObjectInfo& a_info, std::optional<std::uint8_t>& a_stage, FourCC a_signature, std::span<const std::uint8_t> a_payload)
+		{
+			if (a_signature == SIG_DEST) {
+				a_info.destructible = true;
+			} else if (a_signature == SIG_DSTD) {
+				a_stage = a_payload.size() >= 3 ? std::optional(a_payload[2]) : std::nullopt;
+			} else if (a_signature == SIG_DMDL && a_stage) {
+				a_info.destructionModels.push_back(DestructionModel{ .stage = *a_stage, .modelPath = ReadString(a_payload) });
+				a_stage.reset();
+			}
+		}
+
 		void ReadCollectionPlacements(CollectionPart& a_part, std::span<const std::uint8_t> a_payload)
 		{
 			for (std::size_t offset = 0; offset + 28 <= a_payload.size(); offset += 28) {
@@ -892,7 +911,9 @@ namespace tesworld
 					}
 				}
 			}
+			std::optional<std::uint8_t> stage;
 			for (const auto& subrecord : a_record.subrecords) {
+				ReadDestruction(info, stage, subrecord.signature, SubrecordData(a_record, subrecord));
 				if (a_record.signature == SIG_SCOL && subrecord.signature == SIG_ONAM && subrecord.size >= 4) {
 					info.parts.push_back(CollectionPart{
 						.baseFormID = ConvertRecordLocalFormID(FormID{ ReadLE<std::uint32_t>(SubrecordData(a_record, subrecord), 0) }, a_record) });
@@ -1365,7 +1386,9 @@ namespace tesworld
 			SubrecordCursor cursor(a_data);
 			RawSubrecord subrecord{};
 			std::span<const std::uint8_t> payload;
+			std::optional<std::uint8_t> stage;
 			while (cursor.Next(subrecord, payload)) {
+				ReadDestruction(info, stage, subrecord.signature, payload);
 				if (subrecord.signature == SIG_EDID) {
 					info.editorID = ReadString(payload);
 				} else if (subrecord.signature == SIG_OBND && payload.size() >= 12) {

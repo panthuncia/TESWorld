@@ -255,6 +255,14 @@ namespace tesworld
 		std::vector<CollectionPlacement> placements;
 	};
 
+	// A destruction stage (DEST's DSTD) that shows a replacement model (DMDL).
+	struct DestructionModel
+	{
+		// DSTD's model damage stage.
+		std::uint8_t stage{ 0 };
+		std::string modelPath;
+	};
+
 	struct BaseObjectInfo
 	{
 		FormID formID{};
@@ -270,6 +278,9 @@ namespace tesworld
 		FormID material{};
 		// A static collection's parts (SCOL ONAM and DATA); empty for anything else.
 		std::vector<CollectionPart> parts;
+		// Whether the base has destruction data (DEST), and its stages with a replacement model, in record order.
+		bool destructible{ false };
+		std::vector<DestructionModel> destructionModels;
 
 		[[nodiscard]] bool HasDistantLOD() const { return (flags & (1u << 15)) != 0; }
 		[[nodiscard]] bool IsNeverFades() const { return (flags & (1u << 2)) != 0; }
