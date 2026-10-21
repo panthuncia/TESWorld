@@ -189,13 +189,14 @@ namespace tesworld::texture
 			chain.hasAlpha = DirectX::HasAlpha(a_metadata.format) && DirectX::MakeLinear(a_metadata.format) != DXGI_FORMAT_BC1_UNORM;
 			if (!std::isfinite(a_options.srgbScale) || a_options.srgbScale < 0.0f || a_options.srgbScale > 4.0f)
 				return fail("sRGB conversion scale is outside 0..4");
-			const bool linearize = a_options.linearizeSrgb && DirectX::IsSRGB(a_metadata.format);
-			// Texels [a_begin, a_end) of a decoded image to linear.
+			const bool linearize = a_options.srgb != SrgbColor::Keep && DirectX::IsSRGB(a_metadata.format);
+			const bool curve = a_options.srgb == SrgbColor::Linearize;
+			// Texels [a_begin, a_end) of a decoded image converted as a_options.srgb says.
 			const auto linearizeTexels = [&](Image& a_image, std::size_t a_begin, std::size_t a_end) {
 				for (std::size_t i = a_begin; i < a_end; ++i) {
 					if ((i & 3) == 3) continue;
 					const float value = static_cast<float>(a_image.rgba[i]) / 255.0f;
-					const float linear = value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
+					const float linear = !curve ? value : value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
 					a_image.rgba[i] = ToByte(linear * a_options.srgbScale);
 				}
 			};

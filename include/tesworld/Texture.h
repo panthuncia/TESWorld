@@ -51,6 +51,17 @@ namespace tesworld::texture
 		[[nodiscard]] std::size_t Bytes() const;
 	};
 
+	// How a decode converts sRGB-marked RGB samples.
+	enum class SrgbColor : std::uint8_t
+	{
+		// The stored samples, as they are.
+		Keep,
+		// Through the sRGB transfer curve to linear, then times srgbScale.
+		Linearize,
+		// The stored samples times srgbScale, without the curve, as a gamma-naive shader reads them.
+		Scale,
+	};
+
 	struct DecodeOptions
 	{
 		// Levels larger than this on either side are dropped (0 keeps all), so a bake reading 4K textures at a coarse
@@ -58,8 +69,9 @@ namespace tesworld::texture
 		std::uint32_t maxSize{ 0 };
 		// For normal maps written for OpenGL (green up), as Skyrim's are: green is turned to Direct3D's convention.
 		bool flipGreen{ false };
-		// Explicit color use: decode sRGB RGB to linear before filtering; alpha and linear inputs stay unchanged.
-		bool linearizeSrgb{ false };
+		// Explicit color use of sRGB-marked RGB, before filtering; alpha and linear-marked inputs stay unchanged.
+		SrgbColor srgb{ SrgbColor::Keep };
+		// What sRGB-marked RGB is multiplied by under Linearize and Scale (0..4).
 		float srgbScale{ 1.0f };
 	};
 

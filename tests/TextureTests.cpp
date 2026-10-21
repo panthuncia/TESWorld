@@ -68,7 +68,7 @@ namespace
 			const auto bytes = MarkSrgb(*linear, srgb);
 			const auto raw = DecodeDds(bytes); const auto original = DecodeDds(*linear); assert(raw && original && raw->hasAlpha == original->hasAlpha);
 			for (std::size_t i = 0; i < raw->levels.size(); ++i) assert(raw->levels[i].rgba == original->levels[i].rgba);
-			const DecodeOptions options{ .maxSize = 8, .linearizeSrgb = true, .srgbScale = 0.65f };
+			const DecodeOptions options{ .maxSize = 8, .srgb = SrgbColor::Linearize, .srgbScale = 0.65f };
 			const auto converted = DecodeDds(bytes, options); assert(converted && converted->hasAlpha == raw->hasAlpha);
 			const auto unchanged = DecodeDds(*linear, options); assert(unchanged && unchanged->levels.front().rgba == original->levels[3].rgba);
 			const ByteReader reader = [&](std::uint64_t offset, std::uint64_t length) -> std::optional<std::vector<std::uint8_t>> {
@@ -88,13 +88,25 @@ namespace
 					assert(std::abs(static_cast<long>(target[i]) - expected) <= 1);
 				}
 			}
-			assert(!DecodeDds(bytes, DecodeOptions{ .linearizeSrgb = true, .srgbScale = -1.0f }));
+			const auto scaled = DecodeDds(bytes, DecodeOptions{ .maxSize = 8, .srgb = SrgbColor::Scale, .srgbScale = 0.65f });
+			assert(scaled && scaled->levels.size() == converted->levels.size());
+			assert(DecodeDds(*linear, DecodeOptions{ .maxSize = 8, .srgb = SrgbColor::Scale, .srgbScale = 0.65f })->levels.front().rgba == original->levels[3].rgba);
+			for (std::size_t level = 0; level < scaled->levels.size(); ++level) {
+				const auto& source = raw->levels[level + 3].rgba;
+				const auto& target = scaled->levels[level].rgba;
+				for (std::size_t i = 0; i < target.size(); ++i)
+					assert(target[i] == ((i & 3) == 3 ? source[i] : static_cast<std::uint8_t>(std::lround(source[i] / 255.0f * 0.65f * 255.0f))));
+			}
+			assert(!DecodeDds(bytes, DecodeOptions{ .srgb = SrgbColor::Scale, .srgbScale = -1.0f }));
 		}
 		Image contrast(2, 1); contrast.SetTexel(0, 0, {0, 0, 0, 1}); contrast.SetTexel(1, 0, {1, 1, 1, 1});
 		MipChain single; single.levels.push_back(std::move(contrast));
 		const auto bytes = EncodeDds(single, Format::RGBA8); assert(bytes);
-		const auto converted = DecodeDds(MarkSrgb(*bytes, 29), DecodeOptions{ .linearizeSrgb = true });
+		const auto converted = DecodeDds(MarkSrgb(*bytes, 29), DecodeOptions{ .srgb = SrgbColor::Linearize });
 		assert(converted && Near(converted->levels.back().Texel(0, 0).x, 0.5f));
+		// Scaled samples are filtered as stored: the synthesized mip averages the stored values.
+		const auto scaled = DecodeDds(MarkSrgb(*bytes, 29), DecodeOptions{ .srgb = SrgbColor::Scale, .srgbScale = 0.5f });
+		assert(scaled && Near(scaled->levels.back().Texel(0, 0).x, 0.25f, 0.01f));
 	}
 
 	void DdsRoundTripsAndDropsLargeLevels()
