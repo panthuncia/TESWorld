@@ -1,7 +1,7 @@
 # tesworld's GPU shaders, compiled at build time and embedded in the library: DXIL for D3D12 (Windows) and SPIR-V for
 # Vulkan, each looked up at runtime by "<name>.dxil" / "<name>.spv" (src/gpu/Shaders.h).
 #
-#   tesworld_gpu_shader(<list var> NAME <name> SOURCE <file.hlsl> ENTRY <entry> [PROFILE <cs_6_6|vs_6_6|ps_6_6>] [DEPENDS <headers>...])
+#   tesworld_gpu_shader(<list var> NAME <name> SOURCE <file.hlsl> ENTRY <entry> [PROFILE <cs_6_6|vs_6_6|ps_6_6|lib_6_6>] [DEPENDS <headers>...])
 #
 # A graphics program's stages are named "<program>.VS" and "<program>.PS" (ContextImpl::CreateGraphicsProgram).
 #   tesworld_embed_shaders(<target> <list var>)

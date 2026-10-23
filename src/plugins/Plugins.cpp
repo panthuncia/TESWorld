@@ -2510,7 +2510,8 @@ namespace tesworld
 			if (!a_cell.worldFormID || a_cell.IsInterior()) {
 				return std::nullopt;
 			}
-			if (a_cell.gridX && a_cell.gridY) {
+			// The persistent cell's grid is no place: its references are where they stand.
+			if (a_cell.gridX && a_cell.gridY && !a_cell.IsPersistent()) {
 				return CellKey{ *a_cell.worldFormID, *a_cell.gridX, *a_cell.gridY };
 			}
 			return CellKey{
@@ -2644,7 +2645,8 @@ namespace tesworld
 
 			for (auto& land : lands) {
 				const auto cellIt = index.cells.find(land.parentCell);
-				if (cellIt == index.cells.end() || !cellIt->second.worldFormID || !cellIt->second.gridX || !cellIt->second.gridY) {
+				if (cellIt == index.cells.end() || !cellIt->second.worldFormID || !cellIt->second.gridX || !cellIt->second.gridY
+					|| cellIt->second.IsPersistent()) {
 					continue;
 				}
 				land.worldFormID = cellIt->second.worldFormID;
@@ -3615,7 +3617,8 @@ namespace tesworld
 				const auto slot = landByCell.find(landIt->parentCell);
 				if (slot == landByCell.end() || slot->second != landIt->formID) continue;
 				const auto cellIt = snapshot.cellsByFormID.find(landIt->parentCell);
-				if (cellIt == snapshot.cellsByFormID.end() || !cellIt->second.worldFormID || !cellIt->second.gridX || !cellIt->second.gridY) {
+				if (cellIt == snapshot.cellsByFormID.end() || !cellIt->second.worldFormID || !cellIt->second.gridX || !cellIt->second.gridY
+					|| cellIt->second.IsPersistent()) {
 					continue;
 				}
 				winningLands.emplace_back(std::addressof(*landIt), std::addressof(cellIt->second));

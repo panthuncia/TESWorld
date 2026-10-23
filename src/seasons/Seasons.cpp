@@ -238,15 +238,21 @@ namespace tesworld::seasons
 						snowStatics.emplace(ProcessModelPath(stat->modelPath), stat);
 					}
 				}
+				// Each static that may swap, its path as compared, prepared once rather than for every snow model: the
+				// comparison is IContains's, on paths lower-cased as it folds them.
+				std::vector<std::pair<const BaseObjectInfo*, std::string>> swappable;
+				for (const auto* stat : statics) {
+					if (HasSnowShader(*stat) || inBlacklist(*stat, blacklist)) continue;
+					std::string path = stat->modelPath;
+					// REX::STR::REPLACE_LAST_INSTANCE: case-sensitive.
+					if (const auto pos = path.rfind("Moss"); pos != std::string::npos) path.erase(pos, 4);
+					swappable.emplace_back(stat, LowerAscii(path));
+				}
 				SwapMap map;
 				for (const auto& [snowPath, snowStat] : snowStatics) {
-					for (const auto* stat : statics) {
-						std::string path = stat->modelPath;
-						// REX::STR::REPLACE_LAST_INSTANCE: case-sensitive.
-						if (const auto pos = path.rfind("Moss"); pos != std::string::npos) path.erase(pos, 4);
-						if (IContains(path, snowPath) && snowStat != stat && !HasSnowShader(*stat) && !inBlacklist(*stat, blacklist)) {
-							map.emplace(stat->formID, snowStat->formID);
-						}
+					if (snowPath.empty()) continue;
+					for (const auto& [stat, path] : swappable) {
+						if (snowStat != stat && path.find(snowPath) != std::string::npos) map.emplace(stat->formID, snowStat->formID);
 					}
 				}
 				return map;
@@ -263,10 +269,16 @@ namespace tesworld::seasons
 						snowTrees.emplace(path, tree);
 					}
 				}
+				// Each tree's path lower-cased once, as IContains folds it.
+				std::vector<std::string> paths;
+				paths.reserve(trees.size());
+				for (const auto* tree : trees) paths.push_back(LowerAscii(tree->modelPath));
 				SwapMap map;
 				for (const auto& [path, snowTree] : snowTrees) {
-					for (const auto* tree : trees) {
-						if (IContains(tree->modelPath, path) && tree != snowTree) map.emplace(tree->formID, snowTree->formID);
+					const auto needle = LowerAscii(path);
+					if (needle.empty()) continue;
+					for (std::size_t i = 0; i < trees.size(); ++i) {
+						if (trees[i] != snowTree && paths[i].find(needle) != std::string::npos) map.emplace(trees[i]->formID, snowTree->formID);
 					}
 				}
 				return map;
@@ -281,13 +293,18 @@ namespace tesworld::seasons
 				for (const auto* form : forms) {
 					if (OnlyContainsTextureSet(*form, "Snow") && !form->modelPath.empty()) snowForms.emplace(ProcessModelPath(form->modelPath), form);
 				}
+				// Each form that may swap, its path lower-cased once, as IContains folds it.
+				std::vector<std::pair<const BaseObjectInfo*, std::string>> swappable;
+				for (const auto* form : forms) {
+					if (ContainsTextureSet(*form, "Snow") || ContainsTextureSet(*form, "Frozen") ||
+						std::ranges::any_of(blacklist, [&](std::string_view a_word) { return IContains(form->modelPath, a_word); })) continue;
+					swappable.emplace_back(form, LowerAscii(form->modelPath));
+				}
 				SwapMap map;
 				for (const auto& [path, snowForm] : snowForms) {
-					for (const auto* form : forms) {
-						if (IContains(form->modelPath, path) && !ContainsTextureSet(*form, "Snow") && !ContainsTextureSet(*form, "Frozen") &&
-							!std::ranges::any_of(blacklist, [&](std::string_view a_word) { return IContains(form->modelPath, a_word); })) {
-							map.emplace(form->formID, snowForm->formID);
-						}
+					if (path.empty()) continue;
+					for (const auto& [form, lower] : swappable) {
+						if (lower.find(path) != std::string::npos) map.emplace(form->formID, snowForm->formID);
 					}
 				}
 				return map;

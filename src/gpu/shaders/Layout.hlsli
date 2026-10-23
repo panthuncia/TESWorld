@@ -171,6 +171,26 @@ struct Bc7Constants
 	uint pad;
 };
 
+// Push constants of Visibility.hlsl: one ray launch per target and group. input holds each group's first viewpoint and
+// count (two words), then from viewpointsOffset the viewpoints, three floats each; tops a float per target, in target
+// order (x * rows + y); output a word per group and target, nonzero when visible. size is a target's width; radius 0
+// traces every target.
+struct VisibilityConstants
+{
+	uint scene;
+	uint input;
+	uint tops;
+	uint output;
+	uint rows;
+	uint targets;
+	uint samples;
+	uint viewpointsOffset;
+	float size;
+	float radius;
+	uint pad0;
+	uint pad1;
+};
+
 // Push constants of Fill.hlsl (the device check): count words of value + index.
 struct FillConstants
 {

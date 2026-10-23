@@ -88,6 +88,20 @@ namespace tesworld::gpu::detail
 		std::uint32_t dsv{ 0xFFFFFFFFu };
 	};
 
+	// Whether the adapter traces rays (DXR, or VK_KHR_ray_tracing_pipeline with acceleration structures), and the shader
+	// table's sizes when it does. A context is made without it: only what traces rays needs it (VisibilityGpu.h).
+	struct RayTracingSupport
+	{
+		bool supported{ false };
+		// What it lacks, when it isn't supported.
+		std::string missing;
+		std::uint32_t handleSize{ 0 };
+		std::uint32_t baseAlignment{ 0 };
+		std::uint32_t strideAlignment{ 0 };
+		std::uint32_t maxWidth{ 0 };
+		std::uint32_t maxHeight{ 0 };
+	};
+
 	// Work the render thread runs. Pump is called each time the thread wakes, until none has anything to do; it may
 	// execute frames. Fail is called once if the thread fails: the client must finish what it owes.
 	class Client
@@ -117,6 +131,7 @@ namespace tesworld::gpu::detail
 		[[nodiscard]] Api ApiInUse() const { return _api; }
 		[[nodiscard]] const std::string& Adapter() const { return _adapter; }
 		[[nodiscard]] std::uint64_t DedicatedMemory() const { return _dedicatedMemory; }
+		[[nodiscard]] const RayTracingSupport& RayTracing() const { return _rayTracing; }
 
 		// ---- Render thread only ----
 		[[nodiscard]] rhi::Device Device();
@@ -133,6 +148,10 @@ namespace tesworld::gpu::detail
 		void Release(DeviceBuffer& a_buffer);
 		// A device buffer the kernels read (SRV), its bytes copied in by a frame of its own, waited for.
 		[[nodiscard]] DeviceBuffer Upload(std::span<const std::byte> a_bytes, const char* a_name);
+		// A slot of the bindless heap, for a view made with Device(); ReleaseView gives it back.
+		[[nodiscard]] std::uint32_t AllocateView() { return AllocateDescriptor(); }
+		void ReleaseView(std::uint32_t a_view);
+		[[nodiscard]] rhi::DescriptorSlot ViewSlot(std::uint32_t a_view) const;
 		// Records a frame and submits it; a_completed runs on this thread once the GPU has finished it.
 		void ExecuteFrame(std::function<void(rhi::CommandList&)> a_record, std::function<void()> a_completed);
 		// Every frame submitted is finished (and its completion run).
@@ -173,6 +192,7 @@ namespace tesworld::gpu::detail
 		Api _api{ Api::D3D12 };
 		std::string _adapter;
 		std::uint64_t _dedicatedMemory{ 0 };
+		RayTracingSupport _rayTracing;
 
 		// Render thread only.
 		rhi::Backend _backend{ rhi::Backend::D3D12 };

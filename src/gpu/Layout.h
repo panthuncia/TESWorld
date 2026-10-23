@@ -23,6 +23,7 @@ namespace tesworld::gpu::layout
 
 	static_assert(sizeof(BakeConstants) == 64 && sizeof(MaterialHeader) == 80 && sizeof(RegionGpu) == 16 && sizeof(LayerGpu) == 48 &&
 	              sizeof(TextureGpu) == 16 && sizeof(LevelGpu) == 16 && sizeof(StochasticGpu) == 64 && sizeof(WorldHeader) == 32 &&
-	              sizeof(ViewFrameHeader) == 32 && sizeof(ViewDrawGpu) == 144 && sizeof(ViewResolveConstants) == 96,
+	              sizeof(ViewFrameHeader) == 32 && sizeof(ViewDrawGpu) == 144 && sizeof(ViewResolveConstants) == 96 &&
+	              sizeof(VisibilityConstants) == 48,
 		"the kernels index these by their sizes");
 }

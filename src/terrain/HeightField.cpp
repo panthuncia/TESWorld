@@ -56,12 +56,33 @@ namespace tesworld
 			_maxCell = {};
 		}
 
-		const auto waterSource = waterWorld ? waterWorld->formID : a_worldFormID;
-		for (const auto& [_, cell] : a_snapshot.cellsByFormID) {
-			if (cell.worldFormID && *cell.worldFormID == waterSource && cell.gridX && cell.gridY && cell.waterHeight) {
-				_waterHeights.insert_or_assign(CellCoord{ *cell.gridX, *cell.gridY }, *cell.waterHeight);
-			}
+		for (const auto& [at, cell] : ExteriorCells(a_snapshot, waterWorld ? waterWorld->formID : a_worldFormID)) {
+			if (cell->waterHeight) _waterHeights.emplace(at, *cell->waterHeight);
 		}
+	}
+
+	std::optional<std::pair<CellCoord, CellCoord>> CellBounds(const WorldInfo& a_world)
+	{
+		if (!a_world.boundsMin || !a_world.boundsMax) return std::nullopt;
+		const auto& min = *a_world.boundsMin;
+		const auto& max = *a_world.boundsMax;
+		for (int axis = 0; axis < 2; ++axis) {
+			if (!std::isfinite(min[axis]) || !std::isfinite(max[axis]) || !(min[axis] < max[axis])) return std::nullopt;
+		}
+		const auto cell = [](float a_coordinate) { return static_cast<std::int32_t>(std::floor(a_coordinate / kSkyrimTerrainCellSize)); };
+		// The far bound is exclusive: a world ending on a cell's edge doesn't take the cell beyond it.
+		return std::pair{ CellCoord{ cell(min[0]), cell(min[1]) }, CellCoord{ cell(max[0] - 1.0f), cell(max[1] - 1.0f) } };
+	}
+
+	std::unordered_map<CellCoord, const CellInfo*, CellCoordHash> ExteriorCells(const StaticWorldSnapshot& a_snapshot, FormID a_worldFormID)
+	{
+		std::unordered_map<CellCoord, const CellInfo*, CellCoordHash> cells;
+		for (const auto& [formID, cell] : a_snapshot.cellsByFormID) {
+			if (cell.worldFormID != a_worldFormID || !cell.gridX || !cell.gridY || cell.IsInterior() || cell.IsPersistent()) continue;
+			const auto [it, added] = cells.try_emplace(CellCoord{ *cell.gridX, *cell.gridY }, &cell);
+			if (!added && formID.value < it->second->formID.value) it->second = &cell;
+		}
+		return cells;
 	}
 
 	const LandInfo* WorldTerrain::Land(CellCoord a_cell) const

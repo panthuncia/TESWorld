@@ -311,6 +311,9 @@ namespace tesworld
 		std::uint8_t fields{ 0 };
 
 		[[nodiscard]] bool IsInterior() const { return (cellFlags & 0x1u) != 0; }
+		// A worldspace's persistent cell: the record flag 0x400. It has a grid (0,0, in Skyrim.esm) but stands for no
+		// place, so it's never the exterior cell at its grid.
+		[[nodiscard]] bool IsPersistent() const { return (flags & (1u << 10)) != 0; }
 		[[nodiscard]] bool IsPartialForm() const { return (flags & RecordFlagPartialForm) != 0; }
 		// This version with a partial form's fields over it.
 		void Apply(const CellInfo& a_partial);
@@ -440,6 +443,7 @@ namespace tesworld
 		FileID sourceFile{};
 		std::uint16_t formVersion{ 0 };
 
+		[[nodiscard]] bool IsDeleted() const { return (flags & (1u << 5)) != 0; }
 		[[nodiscard]] bool IsInitiallyDisabled() const { return (flags & (1u << 11)) != 0; }
 		[[nodiscard]] bool IsPersistent() const { return (flags & (1u << 10)) != 0; }
 		[[nodiscard]] bool IsVisibleWhenDistant() const { return (flags & (1u << 15)) != 0; }
@@ -718,6 +722,17 @@ namespace tesworld
 		std::vector<PlacementInfo> orphanPlacements;
 		std::size_t suppressedRecords{ 0 };
 		BuildStats buildStats;
+
+		// Every placement, in exterior and interior cells and orphaned, in no particular order.
+		template <class Visit>
+		void ForEachPlacement(Visit&& a_visit) const
+		{
+			for (const auto& [_, placements] : exteriorPlacementsByCell)
+				for (const auto& placement : placements) a_visit(placement);
+			for (const auto& [_, placements] : interiorPlacementsByCell)
+				for (const auto& placement : placements) a_visit(placement);
+			for (const auto& placement : orphanPlacements) a_visit(placement);
+		}
 
 		[[nodiscard]] const std::vector<PlacementInfo>* GetExteriorCell(FormID a_worldFormID, std::int32_t a_x, std::int32_t a_y) const;
 		[[nodiscard]] const std::vector<PlacementInfo>* GetInteriorCell(FormID a_cellFormID) const;

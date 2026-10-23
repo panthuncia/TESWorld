@@ -95,6 +95,29 @@ namespace
 		assert(cycle.LandWorld() == grandchild && cycle.WaterWorld() == child);
 	}
 
+	void ExteriorCellsLeaveOutTheInteriorAndPersistentCells()
+	{
+		auto snapshot = MakeWorld();
+		const FormID world{ 0x3C };
+		const auto add = [&](std::uint32_t a_id, std::int32_t a_x, std::int32_t a_y, std::uint32_t a_flags = 0, std::uint16_t a_cellFlags = 0) {
+			snapshot.cellsByFormID.insert_or_assign(FormID{ a_id }, CellInfo{ .formID = FormID{ a_id }, .worldFormID = world, .flags = a_flags,
+				.cellFlags = a_cellFlags, .gridX = a_x, .gridY = a_y, .waterHeight = static_cast<float>(a_id) });
+		};
+		// The persistent cell at 0,0, with a lower FormID than the cell there; an interior flagged cell; two at 5,5.
+		add(0x9, 0, 0, 0x400);
+		add(0x1001, 5, 5);
+		add(0x1000, 5, 5);
+		add(0x1002, 7, 7, 0, 0x1);
+		const auto cells = ExteriorCells(snapshot, world);
+		assert(cells.contains(CellCoord{ 0, 0 }) && cells.at(CellCoord{ 0, 0 })->formID != FormID{ 0x9 });
+		assert(cells.at(CellCoord{ 5, 5 })->formID == FormID{ 0x1000 });
+		assert(!cells.contains(CellCoord{ 7, 7 }));
+		// Water heights read the same cells: the persistent cell's never stands for 0,0.
+		const WorldTerrain terrain(snapshot, world);
+		assert(Near(terrain.WaterHeight({ 5, 5 }), static_cast<float>(0x1000)));
+		assert(Near(terrain.WaterHeight({ 0, 0 }), -100.0f));
+	}
+
 	void LodSettingsRoundTripAndAlign()
 	{
 		LodSettings settings{ .swCell = { -96, -96 }, .stride = 256, .minLevel = 4, .maxLevel = 32 };
@@ -138,6 +161,7 @@ int main()
 {
 	TerrainSamplesLatticeAndDefaults();
 	ParentSourcesFollowIndependentChains();
+	ExteriorCellsLeaveOutTheInteriorAndPersistentCells();
 	LodSettingsRoundTripAndAlign();
 	PlacementTransformTurnsClockwise();
 	std::cout << "tesworld world tests passed\n";

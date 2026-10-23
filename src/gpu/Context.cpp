@@ -309,7 +309,9 @@ namespace tesworld::gpu
 
 			AdapterFeatureInfo adapter{};
 			ShaderFeatureInfo shader{};
+			RayTracingFeatureInfo rayTracing{};
 			adapter.header.pNext = &shader.header;
+			shader.header.pNext = &rayTracing.header;
 			Check(_device->QueryFeatureInfo(&adapter.header), "feature query");
 			const bool vulkan = a_api == Api::Vulkan;
 			std::vector<std::string> missing;
@@ -333,6 +335,22 @@ namespace tesworld::gpu
 			_api = a_api;
 			_adapter = adapter.name;
 			_dedicatedMemory = adapter.dedicatedVideoMemory;
+
+			// Ray tracing is optional: what needs it checks RayTracing() and does without.
+			std::string rayMissing;
+			const auto lack = [&](const char* a_what) { rayMissing += (rayMissing.empty() ? "" : ", ") + std::string(a_what); };
+			if (!rayTracing.pipeline) lack(vulkan ? "ray-tracing pipelines (VK_KHR_ray_tracing_pipeline)" : "ray-tracing pipelines (DXR)");
+			if (!rayTracing.accelerationStructure) lack(vulkan ? "acceleration structures (VK_KHR_acceleration_structure)" : "acceleration structures");
+			if (rayTracing.pipeline && rayTracing.maxRayRecursionDepth < 1) lack("ray recursion depth 1");
+			_rayTracing = RayTracingSupport{
+				.supported = rayMissing.empty(),
+				.missing = std::move(rayMissing),
+				.handleSize = rayTracing.shaderGroupHandleSize,
+				.baseAlignment = rayTracing.shaderGroupBaseAlignment,
+				.strideAlignment = rayTracing.shaderTableStrideAlignment,
+				.maxWidth = rayTracing.maxRayDispatchWidth,
+				.maxHeight = rayTracing.maxRayDispatchHeight,
+			};
 		}
 
 		void ContextImpl::Shutdown()
@@ -528,6 +546,13 @@ namespace tesworld::gpu
 			}
 			return buffer;
 		}
+
+		void ContextImpl::ReleaseView(std::uint32_t a_view)
+		{
+			if (a_view != layout::kNone) _freeDescriptors.push_back(a_view);
+		}
+
+		rhi::DescriptorSlot ContextImpl::ViewSlot(std::uint32_t a_view) const { return { _heap->GetHandle(), a_view }; }
 
 		void ContextImpl::Release(DeviceBuffer& a_buffer)
 		{

@@ -189,6 +189,9 @@ if(TESWORLD_WITH_GPU)
 	tesworld_gpu_shader(TESWORLD_SHADERS NAME HalfSize SOURCE "${TESWORLD_SHADER_DIR}/Mips.hlsl" ENTRY HalfSizeCS DEPENDS ${TESWORLD_SHADER_HEADERS})
 	tesworld_gpu_shader(TESWORLD_SHADERS NAME Bc7Mode6 SOURCE "${TESWORLD_SHADER_DIR}/Bc7Mode6.hlsl" ENTRY Bc7CS DEPENDS ${TESWORLD_SHADER_HEADERS})
 	tesworld_gpu_shader(TESWORLD_SHADERS NAME Fill SOURCE "${TESWORLD_SHADER_DIR}/Fill.hlsl" ENTRY FillCS DEPENDS ${TESWORLD_SHADER_HEADERS})
+	# A ray-tracing library: every entry is compiled; ENTRY only names one for DXC.
+	tesworld_gpu_shader(TESWORLD_SHADERS NAME Visibility SOURCE "${TESWORLD_SHADER_DIR}/Visibility.hlsl" ENTRY VisibilityRayGen PROFILE lib_6_6
+		DEPENDS ${TESWORLD_SHADER_HEADERS})
 	if(TESWORLD_WITH_RENDER)
 		tesworld_gpu_shader(TESWORLD_SHADERS NAME View.VS SOURCE "${TESWORLD_SHADER_DIR}/View.hlsl" ENTRY ViewVS PROFILE vs_6_6 DEPENDS ${TESWORLD_SHADER_HEADERS})
 		tesworld_gpu_shader(TESWORLD_SHADERS NAME View.PS SOURCE "${TESWORLD_SHADER_DIR}/View.hlsl" ENTRY ViewPS PROFILE ps_6_6 DEPENDS ${TESWORLD_SHADER_HEADERS})
@@ -200,6 +203,7 @@ if(TESWORLD_WITH_GPU)
 		src/gpu/ImageFrames.cpp
 		src/gpu/TerrainBakeGpu.cpp
 		src/gpu/TextureEncoderGpu.cpp
+		src/gpu/VisibilityGpu.cpp
 	)
 	add_library(tesworld::gpu ALIAS tesworld_gpu)
 	tesworld_embed_shaders(tesworld_gpu TESWORLD_SHADERS)

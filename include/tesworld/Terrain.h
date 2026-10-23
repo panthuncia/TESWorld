@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <unordered_map>
+#include <utility>
 
 namespace tesworld
 {
@@ -28,6 +29,15 @@ namespace tesworld
 			       (static_cast<std::size_t>(static_cast<std::uint32_t>(a_cell.y)) * 0x85EBCA77u);
 		}
 	};
+
+	// A worldspace's exterior cells by grid: never an interior cell, nor its persistent cell, which has a grid (0,0 in
+	// Skyrim.esm) but stands for no place; of several at one grid, the lowest FormID's. Every reading of a world's cells
+	// by grid goes through it, so none of them takes the persistent cell for the one at 0,0.
+	[[nodiscard]] std::unordered_map<CellCoord, const CellInfo*, CellCoordHash> ExteriorCells(const StaticWorldSnapshot& a_snapshot, FormID a_worldFormID);
+
+	// A worldspace's bounds (NAM0/NAM9) as the inclusive cells they cover; none when it has none, or only an empty
+	// placeholder (min equal to max on an axis), or bounds that aren't finite or are inverted: then its LAND gives the extent.
+	[[nodiscard]] std::optional<std::pair<CellCoord, CellCoord>> CellBounds(const WorldInfo& a_world);
 
 	// One worldspace's landscape on the game's vertex lattice: a vertex every 128 units, 32 per cell, so lattice
 	// point (gx, gy) is at world (gx * 128, gy * 128). Cells without LAND (or LAND without heights) take the worldspace's
