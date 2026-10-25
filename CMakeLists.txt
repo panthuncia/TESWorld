@@ -123,11 +123,11 @@ if(TESWORLD_WITH_TEXTURE)
 	tesworld_warnings(tesworld_texture)
 endif()
 
-# Atlases: xatlas (at SARP's pin) charts and packs meshes and rectangles; a rasterizer bakes into the pages.
+# Atlases: xatlas (panthuncia's fork, which grows charts incrementally) charts and packs meshes and rectangles; a rasterizer bakes into the pages.
 if(TESWORLD_WITH_ATLAS)
 	FetchContent_Declare(xatlas
-		GIT_REPOSITORY https://github.com/jpcy/xatlas.git
-		GIT_TAG f700c7790aaa030e794b52ba7791a05c085faf0c
+		GIT_REPOSITORY https://github.com/panthuncia/xatlas.git
+		GIT_TAG 431832c0aac0b993da69a8af8b12761ddd222830
 		SOURCE_SUBDIR do-not-build
 		SYSTEM)
 	FetchContent_MakeAvailable(xatlas)

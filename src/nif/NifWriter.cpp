@@ -199,8 +199,9 @@ namespace tesworld::nif
 			// Create left the constructor's UV flag on when it was given no UVs, so tangent space was computed then
 			// too, from zero UVs.
 			const bool uvFlagInCreate = a_shape.uvs.empty() || a_shape.uvs.size() == count;
-			layout.tangentSpace = layout.normals && uvFlagInCreate;
 			layout.givenTangents = !a_shape.tangents.empty() && a_shape.tangents.size() == count && a_shape.bitangents.size() == count;
+			// Given tangents are written over every byte tangent space makes, so it isn't made for them.
+			layout.tangentSpace = layout.normals && uvFlagInCreate && !layout.givenTangents;
 			layout.colors = !a_shape.colors.empty() && a_shape.colors.size() == count;
 
 			layout.flags = kVertexPosition;
