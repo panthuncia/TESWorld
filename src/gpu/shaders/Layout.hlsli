@@ -171,6 +171,19 @@ struct Bc7Constants
 	uint pad;
 };
 
+// Push constants of BcChannels.hlsl: BC4 (channels 1) or BC5 (2) blocks of an RGBA8 level, rows rowPitch apart.
+struct BcChannelsConstants
+{
+	uint source;
+	uint sourceOffset;
+	uint destination;
+	uint destinationOffset;
+	uint width;
+	uint height;
+	uint rowPitch;
+	uint channels;
+};
+
 // Push constants of Fill.hlsl (the device check): count words of value + index.
 struct FillConstants
 {

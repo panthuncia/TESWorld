@@ -29,8 +29,11 @@ namespace tesworld::gpu::detail
 		std::uint64_t readbackOffset{ 0 };
 		std::uint64_t readbackBytes{ 0 };
 
-		// BC7 is encoded on the GPU; other formats come back as RGBA8 levels for the CPU to encode.
-		[[nodiscard]] bool GpuBlocks() const { return format == texture::Format::BC7; }
+		// BC7, BC5 and BC4 are encoded on the GPU; other formats come back as RGBA8 levels for the CPU to encode.
+		[[nodiscard]] bool GpuBlocks() const
+		{
+			return format == texture::Format::BC7 || format == texture::Format::BC5 || format == texture::Format::BC4;
+		}
 		[[nodiscard]] std::uint32_t Levels() const { return static_cast<std::uint32_t>(levelOffsets.size()); }
 		[[nodiscard]] std::uint32_t LevelWidth(std::uint32_t a_level) const { return (std::max)(1u, width >> a_level); }
 		[[nodiscard]] std::uint32_t LevelHeight(std::uint32_t a_level) const { return (std::max)(1u, height >> a_level); }
@@ -89,6 +92,7 @@ namespace tesworld::gpu::detail
 		ContextImpl& _gpu;
 		ComputeProgram _halfSize;
 		ComputeProgram _bc7;
+		ComputeProgram _bcChannels;
 	};
 
 	// An image's bytes from Read as a DDS: its BC7 blocks wrapped, or its RGBA8 levels encoded on the CPU. Any thread.

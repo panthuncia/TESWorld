@@ -5,9 +5,9 @@
 
 #include <memory>
 
-// Texture encoding on the GPU (tesworld::gpu): BC7 chains uploaded in frames on the context's thread, encoded with the
-// terrain bake's BC7 kernel (BasicRenderer's mode 6), read back and wrapped as DirectXTex would. Other formats, and
-// everything owed once the GPU fails, are encoded on the CPU.
+// Texture encoding on the GPU (tesworld::gpu): BC7, BC5 and BC4 chains uploaded in frames on the context's thread, encoded
+// with the terrain bake's BC7 kernel (BasicRenderer's mode 6) or BcChannels.hlsl, read back and wrapped as DirectXTex
+// would. Other formats, and everything owed once the GPU fails, are encoded on the CPU.
 namespace tesworld::texture
 {
 	// Where requests finish.

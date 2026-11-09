@@ -45,7 +45,8 @@ namespace tesworld::gpu::detail
 	ImagePrograms::ImagePrograms(ContextImpl& a_gpu) :
 		_gpu(a_gpu),
 		_halfSize(a_gpu.CreateProgram("HalfSize", "HalfSizeCS", sizeof(layout::HalfSizeConstants) / 4)),
-		_bc7(a_gpu.CreateProgram("Bc7Mode6", "Bc7CS", sizeof(layout::Bc7Constants) / 4))
+		_bc7(a_gpu.CreateProgram("Bc7Mode6", "Bc7CS", sizeof(layout::Bc7Constants) / 4)),
+		_bcChannels(a_gpu.CreateProgram("BcChannels", "BcChannelsCS", sizeof(layout::BcChannelsConstants) / 4))
 	{}
 
 	void ImagePrograms::Ensure(ImageBuffers& a_buffers, const ImageLayout& a_layout, const char* a_name) const
@@ -135,6 +136,19 @@ namespace tesworld::gpu::detail
 				const auto height = image->LevelHeight(level);
 				const auto blocksWide = (width + 3) / 4;
 				const auto blocksHigh = (height + 3) / 4;
+				if (image->format != texture::Format::BC7) {
+					const std::uint32_t channels = image->format == texture::Format::BC5 ? 2u : 1u;
+					const layout::BcChannelsConstants channelConstants{ .source = a_buffers.scratch.uav,
+						.sourceOffset = static_cast<std::uint32_t>(image->levelOffsets[level]),
+						.destination = a_buffers.blocks.uav,
+						.destinationOffset = static_cast<std::uint32_t>(image->blockOffsets[level]),
+						.width = width,
+						.height = height,
+						.rowPitch = blocksWide * 8 * channels,
+						.channels = channels };
+					ContextImpl::Dispatch(a_commands, _bcChannels, &channelConstants, (blocksWide + 7) / 8, (blocksHigh + 7) / 8, 1);
+					continue;
+				}
 				const layout::Bc7Constants constants{ .source = a_buffers.scratch.uav,
 					.sourceOffset = static_cast<std::uint32_t>(image->levelOffsets[level]),
 					.destination = a_buffers.blocks.uav,

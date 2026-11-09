@@ -85,7 +85,7 @@ namespace tesworld::texture
 
 			void Encode(EncodeRequest a_request, Callback a_done) override
 			{
-				if (a_request.format != Format::BC7 || a_request.chain.Empty()) {
+				if ((a_request.format != Format::BC7 && a_request.format != Format::BC5 && a_request.format != Format::BC4) || a_request.chain.Empty()) {
 					if (_completion == Completion::ContextThread) {
 						EncodeResult result;
 						if (auto dds = EncodeDds(a_request.chain, a_request.format, &result.error)) result.dds = std::move(*dds);
