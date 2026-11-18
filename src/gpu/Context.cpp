@@ -4,8 +4,8 @@
 
 #include "tesworld/Profiling.h"
 
-#include <OpenRenderGraph/PersistentGraphHost.h>
-#include <Render/Runtime/RuntimeDevice.h>
+#include <OpenRenderGraph/GraphHost.h>
+#include <OpenRenderGraph/Runtime.h>
 #include <Render/Runtime/ThreadPoolTaskService.h>
 #include <RenderPasses/Base/TypedRenderGraphPass.h>
 #include <Resources/Buffers/Buffer.h>
@@ -261,10 +261,14 @@ namespace tesworld::gpu
 				_freeDsvs.push_back(i);
 			}
 
-			_host = std::make_unique<org::PersistentGraphHost>(org::PersistentGraphHost::Desc{
+			_runtime = org::Runtime::Create(org::Runtime::Desc{
 				.device = _device.Get(),
 				.backend = _backend,
+				.slots = 2,
 				.tasks = std::make_shared<org::runtime::ThreadPoolTaskService>(2),
+			});
+			_host = std::make_unique<org::GraphHost>(org::GraphHost::Desc{
+				.runtime = _runtime,
 				.framesInFlight = 2,
 				.epochOrder = {},
 			});
@@ -359,7 +363,8 @@ namespace tesworld::gpu
 				_device->WaitIdle();
 			}
 			_inFlight.clear();
-			// ORG resources (the heartbeat buffer) must be gone before the host's destructor shuts the runtime device down.
+			// ORG resources (the heartbeat buffer) must be gone before the host, and the host before the runtime: the runtime
+			// outlives its graphs.
 			if (_host) {
 				_host->RemoveExtension("tesworld");
 				_host->DestroyGraph();
@@ -371,6 +376,7 @@ namespace tesworld::gpu
 			_rtvHeap.Reset();
 			_dsvHeap.Reset();
 			_host.reset();
+			_runtime.reset();
 			_device.Reset();
 		}
 

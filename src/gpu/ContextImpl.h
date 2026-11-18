@@ -2,7 +2,7 @@
 
 // The GPU context's insides, for tesworld::gpu's own sources: BasicRHI and OpenRenderGraph stay out of public headers.
 // The structure is FasterNGIO's GpuRejector (src/Gpu/GpuRejector.cpp) with its ray tracing taken out: a render thread
-// owns the device and an OpenRenderGraph PersistentGraphHost; work reaches it as clients the thread pumps, each frame
+// owns the device and an OpenRenderGraph GraphHost; work reaches it as clients the thread pumps, each frame
 // recorded by a callback and finished by another once the GPU has run it.
 
 #include "tesworld/Gpu.h"
@@ -27,7 +27,8 @@
 namespace org
 {
 	class Buffer;
-	class PersistentGraphHost;
+	class GraphHost;
+	class Runtime;
 }
 
 namespace tesworld::gpu::detail
@@ -206,7 +207,8 @@ namespace tesworld::gpu::detail
 		rhi::DescriptorHeapPtr _dsvHeap;
 		std::vector<std::uint32_t> _freeRtvs;
 		std::vector<std::uint32_t> _freeDsvs;
-		std::unique_ptr<org::PersistentGraphHost> _host;
+		std::shared_ptr<org::Runtime> _runtime;
+		std::unique_ptr<org::GraphHost> _host;
 		std::shared_ptr<org::Buffer> _heartbeat;
 		std::shared_ptr<PassContext> _passContext;
 		std::vector<Client*> _clients;

@@ -49,7 +49,7 @@ ctest --preset windows
 ```
 
 nifly and xatlas come from upstream at pinned commits through FetchContent, as do BasicTelemetry, BasicRHI, OpenRenderGraph
-and volk (at FasterNGIO's pins) for the GPU and profiling builds; the rest from vcpkg. `windows-gpu` / `linux-gpu`
+and volk (BasicRHI and OpenRenderGraph from their `dev` branches) for the GPU and profiling builds; the rest from vcpkg. `windows-gpu` / `linux-gpu`
 build the GPU module and its tests.
 
 ## Licence

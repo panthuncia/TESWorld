@@ -1,4 +1,5 @@
-# The GPU stack (TESWORLD_WITH_GPU): BasicRHI (D3D12 and Vulkan) and OpenRenderGraph over it, at FasterNGIO's pins.
+# The GPU stack (TESWORLD_WITH_GPU): BasicRHI (D3D12 and Vulkan) and OpenRenderGraph over it, pinned to commits
+# of their dev branches.
 # Each is made available before the next, so their own ../sibling fallbacks are never taken; a host that already
 # provides a target keeps its own. Shaders are compiled at build time (TesworldShaders.cmake): no DXC at runtime.
 include_guard(GLOBAL)
@@ -35,7 +36,7 @@ endif()
 if(NOT TARGET BasicRHI::BasicRHI)
 	FetchContent_Declare(BasicRHI
 		GIT_REPOSITORY https://github.com/panthuncia/BasicRHI.git
-		GIT_TAG beb5fcdacfa8384f476af5bec2fbc45bfdf6dba8
+		GIT_TAG 12750f7754905271ce3cc0be58860455824dd492
 		EXCLUDE_FROM_ALL
 		SYSTEM)
 	FetchContent_MakeAvailable(BasicRHI)
@@ -46,7 +47,7 @@ endif()
 if(NOT TARGET OpenRenderGraph::OpenRenderGraph)
 	FetchContent_Declare(OpenRenderGraph
 		GIT_REPOSITORY https://github.com/panthuncia/OpenRenderGraph.git
-		GIT_TAG b8cd0847feff8cd45dcd3a71710664afe3f73d27
+		GIT_TAG 36ce3136e640a2c09d75336fb8e4e63e1c28220f
 		EXCLUDE_FROM_ALL
 		SYSTEM)
 	FetchContent_MakeAvailable(OpenRenderGraph)
