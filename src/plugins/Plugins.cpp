@@ -61,6 +61,8 @@ namespace tesworld
 		constexpr FourCC SIG_XCLW = MakeFourCC('X', 'C', 'L', 'W');
 		constexpr FourCC SIG_XSCL = MakeFourCC('X', 'S', 'C', 'L');
 		constexpr FourCC SIG_XESP = MakeFourCC('X', 'E', 'S', 'P');
+		constexpr FourCC SIG_XEMI = MakeFourCC('X', 'E', 'M', 'I');
+		constexpr FourCC SIG_REGN = MakeFourCC('R', 'E', 'G', 'N');
 		constexpr FourCC SIG_STAT = MakeFourCC('S', 'T', 'A', 'T');
 		constexpr FourCC SIG_MSTT = MakeFourCC('M', 'S', 'T', 'T');
 		constexpr FourCC SIG_TREE = MakeFourCC('T', 'R', 'E', 'E');
@@ -415,7 +417,7 @@ namespace tesworld
 				       a_subrecordSignature == SIG_VTXT;
 			}
 			if (a_recordSignature == SIG_REFR || a_recordSignature == SIG_ACHR) {
-				return a_subrecordSignature == SIG_NAME || a_subrecordSignature == SIG_DATA || a_subrecordSignature == SIG_XSCL || a_subrecordSignature == SIG_XESP;
+				return a_subrecordSignature == SIG_NAME || a_subrecordSignature == SIG_DATA || a_subrecordSignature == SIG_XSCL || a_subrecordSignature == SIG_XESP || a_subrecordSignature == SIG_XEMI;
 			}
 			return false;
 		}
@@ -1289,6 +1291,8 @@ namespace tesworld
 				info.enableParent = ConvertRecordLocalFormID(FormID{ ReadLE<std::uint32_t>(bytes, 0) }, a_record);
 				info.enableParentFlags = ReadLE<std::uint32_t>(bytes, 4);
 			}
+			if (const auto* xemi = FindSubrecord(a_record, SIG_XEMI); xemi && xemi->size >= 4)
+				info.emittance = ConvertRecordLocalFormID(FormID{ReadLE<std::uint32_t>(SubrecordData(a_record, *xemi), 0)}, a_record);
 			return info;
 		}
 
@@ -1660,6 +1664,8 @@ namespace tesworld
 				} else if (subrecord.signature == SIG_XESP && payload.size() >= 8) {
 					info.enableParent = ConvertContextLocalFormID(FormID{ ReadLE<std::uint32_t>(payload, 0) }, a_sourceFileID, a_sourceMasterFileIDs);
 					info.enableParentFlags = ReadLE<std::uint32_t>(payload, 4);
+				} else if (subrecord.signature == SIG_XEMI && payload.size() >= 4) {
+					info.emittance = ConvertContextLocalFormID(FormID{ReadLE<std::uint32_t>(payload, 0)}, a_sourceFileID, a_sourceMasterFileIDs);
 				}
 			}
 
@@ -1693,7 +1699,7 @@ namespace tesworld
 			++a_shard.stats.recordsScanned;
 
 			const auto needsTypedPayload =
-				header.signature == SIG_MATO ||
+				header.signature == SIG_MATO || header.signature == SIG_REGN ||
 				header.signature == SIG_MATT ||
 				header.signature == SIG_WRLD ||
 				header.signature == SIG_CELL ||
@@ -1770,7 +1776,7 @@ namespace tesworld
 			a_shard.stats.uncompressedRecordBytes += recordData.size();
 			++a_shard.stats.typedRecords;
 
-			if (header.signature == SIG_MATO) {
+			if (header.signature == SIG_MATO || header.signature == SIG_REGN) {
 				EditorIDInfo info{ .formID = loadOrderFormID };
 				SubrecordCursor cursor(recordData);
 				RawSubrecord subrecord{};
@@ -1781,7 +1787,7 @@ namespace tesworld
 						break;
 					}
 				}
-				a_shard.materialObjects.push_back(std::move(info));
+				(header.signature == SIG_REGN ? a_shard.regions : a_shard.materialObjects).push_back(std::move(info));
 			} else if (header.signature == SIG_MATT) {
 				MaterialTypeInfo info{ .formID = loadOrderFormID };
 				SubrecordCursor cursor(recordData);
@@ -1974,6 +1980,7 @@ namespace tesworld
 			reserve(&StaticPluginShard::grasses);
 			reserve(&StaticPluginShard::worlds);
 			reserve(&StaticPluginShard::materialObjects);
+			reserve(&StaticPluginShard::regions);
 			reserve(&StaticPluginShard::materialTypes);
 			reserve(&StaticPluginShard::cells);
 			reserve(&StaticPluginShard::lands);
@@ -1990,6 +1997,7 @@ namespace tesworld
 			move(a_to.grasses, a_from.grasses);
 			move(a_to.worlds, a_from.worlds);
 			move(a_to.materialObjects, a_from.materialObjects);
+			move(a_to.regions, a_from.regions);
 			move(a_to.materialTypes, a_from.materialTypes);
 			move(a_to.cells, a_from.cells);
 			move(a_to.lands, a_from.lands);
@@ -3535,6 +3543,8 @@ namespace tesworld
 					snapshot.materialObjectsByFormID.insert_or_assign(material.formID, material.editorID);
 				}
 			}
+			for (const auto& region : shard.regions)
+				if (!region.formID.IsNull() && !region.formID.IsNone()) snapshot.regionsByFormID.insert_or_assign(region.formID, region.editorID);
 			for (const auto& material : shard.materialTypes) {
 				if (!material.formID.IsNull() && !material.formID.IsNone()) {
 					snapshot.materialTypesByFormID.insert_or_assign(material.formID, material);
@@ -3585,6 +3595,8 @@ namespace tesworld
 					snapshot.worldsByFormID.erase(suppressor.formID);
 				} else if (suppressor.signature == SIG_MATO) {
 					snapshot.materialObjectsByFormID.erase(suppressor.formID);
+				} else if (suppressor.signature == SIG_REGN) {
+					snapshot.regionsByFormID.erase(suppressor.formID);
 				} else if (suppressor.signature == SIG_MATT) {
 					snapshot.materialTypesByFormID.erase(suppressor.formID);
 				} else if (suppressor.signature == SIG_CELL) {
@@ -3725,34 +3737,50 @@ namespace tesworld
 				}
 			}
 
+			// Each placement's destination is decided in parallel into its own slot, then appended in winning order,
+			// so every cell lists its placements in the same order as the sequential path, on every run. (Merging
+			// per-thread buckets made the order depend on which thread took which range.)
+			enum class BucketTarget : std::uint8_t { None, Exterior, Interior, Orphan };
+			struct BucketedPlacement
+			{
+				BucketTarget target{ BucketTarget::None };
+				CellKey exteriorKey{};
+				FormID interiorCell{};
+				PlacementInfo placement;
+			};
+			std::vector<BucketedPlacement> bucketed(winningPlacements.size());
 			oneapi::tbb::enumerable_thread_specific<LocalStaticPlacementBuckets> localBuckets;
 			oneapi::tbb::parallel_for(
 				oneapi::tbb::blocked_range<std::size_t>(0, winningPlacements.size(), 4096),
 				[&](const oneapi::tbb::blocked_range<std::size_t>& range) {
 					auto& local = localBuckets.local();
 					for (std::size_t i = range.begin(); i != range.end(); ++i) {
-						PlacementInfo placement = *winningPlacements[i];
-						if (placement.IsInitiallyDisabled() && !a_options.includeDisabledPlacements) {
+						const PlacementInfo& source = *winningPlacements[i];
+						if (source.IsInitiallyDisabled() && !a_options.includeDisabledPlacements) {
 							++local.disabled;
 							continue;
 						}
-						if (!snapshot.baseObjectsByFormID.contains(placement.baseFormID)) {
+						if (!snapshot.baseObjectsByFormID.contains(source.baseFormID)) {
 							++local.missingBase;
 							continue;
 						}
-						const auto cellIt = snapshot.cellsByFormID.find(placement.parentCell);
+						auto& slot = bucketed[i];
+						slot.placement = source;
+						const auto cellIt = snapshot.cellsByFormID.find(source.parentCell);
 						if (cellIt == snapshot.cellsByFormID.end()) {
 							++local.missingCell;
-							local.orphan.push_back(std::move(placement));
+							slot.target = BucketTarget::Orphan;
 							continue;
 						}
 
 						const auto& cell = cellIt->second;
-						placement.worldFormID = cell.worldFormID;
-						if (auto exteriorKey = ResolvePlacementExteriorCellKey(cell, placement)) {
-							local.exterior.emplace_back(*exteriorKey, std::move(placement));
+						slot.placement.worldFormID = cell.worldFormID;
+						if (auto exteriorKey = ResolvePlacementExteriorCellKey(cell, slot.placement)) {
+							slot.target = BucketTarget::Exterior;
+							slot.exteriorKey = *exteriorKey;
 						} else {
-							local.interior.emplace_back(cell.formID, std::move(placement));
+							slot.target = BucketTarget::Interior;
+							slot.interiorCell = cell.formID;
 						}
 						++local.winning;
 					}
@@ -3763,16 +3791,21 @@ namespace tesworld
 				snapshot.buildStats.skippedDisabledPlacements += local.disabled;
 				snapshot.buildStats.skippedMissingBasePlacements += local.missingBase;
 				snapshot.buildStats.skippedMissingCellPlacements += local.missingCell;
-				for (auto& [cellKey, placement] : local.exterior) {
-					snapshot.exteriorPlacementsByCell[cellKey].push_back(std::move(placement));
+			}
+			for (auto& slot : bucketed) {
+				switch (slot.target) {
+				case BucketTarget::Exterior:
+					snapshot.exteriorPlacementsByCell[slot.exteriorKey].push_back(std::move(slot.placement));
+					break;
+				case BucketTarget::Interior:
+					snapshot.interiorPlacementsByCell[slot.interiorCell].push_back(std::move(slot.placement));
+					break;
+				case BucketTarget::Orphan:
+					snapshot.orphanPlacements.push_back(std::move(slot.placement));
+					break;
+				case BucketTarget::None:
+					break;
 				}
-				for (auto& [cellFormID, placement] : local.interior) {
-					snapshot.interiorPlacementsByCell[cellFormID].push_back(std::move(placement));
-				}
-				snapshot.orphanPlacements.insert(
-					snapshot.orphanPlacements.end(),
-					std::make_move_iterator(local.orphan.begin()),
-					std::make_move_iterator(local.orphan.end()));
 			}
 		} else {
 			for (auto shardIt = a_shards.rbegin(); shardIt != a_shards.rend(); ++shardIt) {

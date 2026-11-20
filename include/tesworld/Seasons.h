@@ -143,7 +143,8 @@ namespace tesworld::seasons
 		// A file's text; nullopt when it isn't there.
 		std::function<std::optional<std::string>(std::string_view a_path)> read;
 		std::function<bool(std::string_view a_path)> exists;
-		// The files directly in a folder with an extension (".ini"), as paths. Seasons reads Data\Seasons loose.
+		// The files directly in a folder with an extension (".ini"), preserving original filename case.
+		// Seasons reads Data\Seasons loose; normalized VFS paths lose its case-sensitive matching/sort behavior.
 		std::function<std::vector<std::string>(std::string_view a_folder, std::string_view a_extension)> list;
 	};
 

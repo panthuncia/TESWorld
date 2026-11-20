@@ -49,6 +49,11 @@ namespace
 			{ "Seasons\\Zed_WIN.ini", "[Trees]\nA|B\n" },
 			{ "Seasons\\Alpha_WIN.ini", "[Trees]\nA|C\n" },
 			{ "Seasons\\Other_SPR.ini", "" },
+			{ "Seasons\\Ignored_win.ini", "" },
+			{ "Seasons\\Ignored_WIN.INI", "" },
+			{ "Seasons\\ExcludedMainFormSwap_WIN.ini", "" },
+			{ "Seasons\\MAINFORMSWAP_WIN.ini", "" },
+			{ "Seasons\\aLower_WIN.ini", "" },
 			{ "Seasons\\MainFormSwap_WIN.ini", "" },
 		};
 		const DataFiles files{
@@ -67,7 +72,9 @@ namespace
 		};
 		const auto read = ReadSeasonsSettings(files);
 		assert(read.editorIDs && !read.installed && !read.settingsFound && read.automaticWinterFile == "Seasons\\MainFormSwap_WIN.ini");
-		assert(read.swapFiles.size() == 3 && read.swapFiles[0].name == "Alpha_WIN.ini" && read.swapFiles[1].season == Season::Spring);
+		assert(read.swapFiles.size() == 5);
+		assert(read.swapFiles[0].name == "Alpha_WIN.ini" && read.swapFiles[1].name == "MAINFORMSWAP_WIN.ini");
+		assert(read.swapFiles[2].season == Season::Spring && read.swapFiles[3].name == "Zed_WIN.ini" && read.swapFiles[4].name == "aLower_WIN.ini");
 	}
 
 	// Skyrim.esm's snow land textures and a few to swap, two trees and a snowy rock with its plain one.

@@ -188,6 +188,7 @@ if(TESWORLD_WITH_GPU)
 	tesworld_gpu_shader(TESWORLD_SHADERS NAME TerrainBake SOURCE "${TESWORLD_SHADER_DIR}/TerrainBake.hlsl" ENTRY BakeCS DEPENDS ${TESWORLD_SHADER_HEADERS})
 	tesworld_gpu_shader(TESWORLD_SHADERS NAME HalfSize SOURCE "${TESWORLD_SHADER_DIR}/Mips.hlsl" ENTRY HalfSizeCS DEPENDS ${TESWORLD_SHADER_HEADERS})
 	tesworld_gpu_shader(TESWORLD_SHADERS NAME Bc7Mode6 SOURCE "${TESWORLD_SHADER_DIR}/Bc7Mode6.hlsl" ENTRY Bc7CS DEPENDS ${TESWORLD_SHADER_HEADERS})
+	tesworld_gpu_shader(TESWORLD_SHADERS NAME BcChannels SOURCE "${TESWORLD_SHADER_DIR}/BcChannels.hlsl" ENTRY BcChannelsCS DEPENDS ${TESWORLD_SHADER_HEADERS})
 	tesworld_gpu_shader(TESWORLD_SHADERS NAME Fill SOURCE "${TESWORLD_SHADER_DIR}/Fill.hlsl" ENTRY FillCS DEPENDS ${TESWORLD_SHADER_HEADERS})
 	if(TESWORLD_WITH_RENDER)
 		tesworld_gpu_shader(TESWORLD_SHADERS NAME View.VS SOURCE "${TESWORLD_SHADER_DIR}/View.hlsl" ENTRY ViewVS PROFILE vs_6_6 DEPENDS ${TESWORLD_SHADER_HEADERS})
@@ -196,6 +197,7 @@ if(TESWORLD_WITH_GPU)
 	endif()
 
 	add_library(tesworld_gpu STATIC
+		src/gpu/Compute.cpp
 		src/gpu/Context.cpp
 		src/gpu/ImageFrames.cpp
 		src/gpu/TerrainBakeGpu.cpp

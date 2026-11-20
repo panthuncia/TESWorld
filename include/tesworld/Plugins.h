@@ -430,6 +430,7 @@ namespace tesworld
 		float scale{ 1.0f };
 		std::optional<FormID> enableParent;
 		std::uint32_t enableParentFlags{ 0 };
+		std::optional<FormID> emittance;
 		// The plugin whose version this is (the winning one, in a snapshot), and its record's form version.
 		FileID sourceFile{};
 		std::uint16_t formVersion{ 0 };
@@ -669,6 +670,7 @@ namespace tesworld
 		std::vector<GrassInfo> grasses;
 		std::vector<WorldInfo> worlds;
 		std::vector<EditorIDInfo> materialObjects;
+		std::vector<EditorIDInfo> regions;
 		std::vector<MaterialTypeInfo> materialTypes;
 		std::vector<CellInfo> cells;
 		std::vector<LandInfo> lands;
@@ -701,6 +703,7 @@ namespace tesworld
 		// The winning version of each worldspace, with large references (RNAM) merged from every master's version.
 		std::unordered_map<FormID, WorldInfo, FormIDHash> worldsByFormID;
 		std::unordered_map<FormID, std::string, FormIDHash> materialObjectsByFormID;
+		std::unordered_map<FormID, std::string, FormIDHash> regionsByFormID;
 		std::unordered_map<FormID, MaterialTypeInfo, FormIDHash> materialTypesByFormID;
 		// The order forms were first defined in, through the load order, and the first definition's editor ID: the
 		// engine's creation order and the editor ID powerofthree's Tweaks keeps. Land textures, material types, texture

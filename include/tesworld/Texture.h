@@ -97,7 +97,9 @@ namespace tesworld::texture
 		BC3,
 		BC5,
 		BC7,
-		RGBA8
+		RGBA8,
+		// One channel (red), as BC5 stores each of its two.
+		BC4
 	};
 
 	[[nodiscard]] std::optional<std::vector<std::uint8_t>> EncodeDds(const MipChain& a_chain, Format a_format, std::string* a_error = nullptr);

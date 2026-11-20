@@ -110,6 +110,7 @@ namespace tesworld::texture
 			case Format::BC3: return DXGI_FORMAT_BC3_UNORM;
 			case Format::BC5: return DXGI_FORMAT_BC5_UNORM;
 			case Format::BC7: return DXGI_FORMAT_BC7_UNORM;
+			case Format::BC4: return DXGI_FORMAT_BC4_UNORM;
 			default: return DXGI_FORMAT_R8G8B8A8_UNORM;
 			}
 		}
@@ -489,7 +490,7 @@ namespace tesworld::texture
 
 	std::size_t BlockBytes(std::uint32_t a_width, std::uint32_t a_height, Format a_format)
 	{
-		const std::size_t blockBytes = a_format == Format::BC1 ? 8 : 16;
+		const std::size_t blockBytes = a_format == Format::BC1 || a_format == Format::BC4 ? 8 : 16;
 		return static_cast<std::size_t>((std::max)(1u, (a_width + 3) / 4)) * (std::max)(1u, (a_height + 3) / 4) * blockBytes;
 	}
 
