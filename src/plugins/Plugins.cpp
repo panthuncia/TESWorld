@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -240,7 +241,7 @@ namespace tesworld
 			return LowerAscii(platform::PathToUtf8(a_path.filename()));
 		}
 
-		[[nodiscard]] std::size_t FindLoadOrderIndex(std::span<const LoadOrderEntry> a_loadOrder, std::string_view a_pluginName)
+		[[nodiscard]] std::optional<std::size_t> FindLoadOrderIndex(std::span<const LoadOrderEntry> a_loadOrder, std::string_view a_pluginName)
 		{
 			const auto key = LowerAscii(a_pluginName);
 			for (std::size_t i = 0; i < a_loadOrder.size(); ++i) {
@@ -248,17 +249,31 @@ namespace tesworld
 					return i;
 				}
 			}
-			throw std::runtime_error("missing master in load order: " + std::string(a_pluginName));
+			return std::nullopt;
 		}
 
-		[[nodiscard]] std::shared_ptr<const std::vector<FileID>> BuildSourceMasterFileIDs(const LoadOrderEntry& a_entry, std::span<const LoadOrderEntry> a_loadOrder)
+		[[nodiscard]] std::shared_ptr<const std::vector<FileID>> BuildSourceMasterFileIDs(
+			const LoadOrderEntry& a_entry,
+			std::span<const LoadOrderEntry> a_loadOrder,
+			PluginParser::MissingMasterPolicy a_policy)
 		{
 			std::vector<FileID> result;
 			result.reserve(a_entry.masters.size());
 			for (const auto& master : a_entry.masters) {
-				result.push_back(a_loadOrder[FindLoadOrderIndex(a_loadOrder, master)].fileID);
+				const auto index = FindLoadOrderIndex(a_loadOrder, master);
+				if (!index && a_policy == PluginParser::MissingMasterPolicy::Throw) {
+					throw std::runtime_error("missing master in load order: " + master + " (a master of " + a_entry.pluginName + ")");
+				}
+				result.push_back(index ? a_loadOrder[*index].fileID : kMissingMasterFileID);
 			}
 			return std::make_shared<const std::vector<FileID>>(std::move(result));
+		}
+
+		// A record of a missing master, or one in a missing master's world or cell (Skip policy only: otherwise no
+		// form resolves to kMissingMasterFileID).
+		[[nodiscard]] bool BelongsToMissingMaster(FormID a_formID, const std::optional<FormID>& a_world, const std::optional<FormID>& a_cell)
+		{
+			return a_formID.IsFromMissingMaster() || (a_world && a_world->IsFromMissingMaster()) || (a_cell && a_cell->IsFromMissingMaster());
 		}
 
 		[[nodiscard]] FormID ConvertRecordLocalFormID(FormID a_fileFormID, const RawRecord& a_record)
@@ -637,6 +652,14 @@ namespace tesworld
 			}
 
 			const auto loadOrderFormID = ConvertContextLocalFormID(header.formID, a_context.entry.fileID, a_context.sourceMasterFileIDs);
+			if (BelongsToMissingMaster(loadOrderFormID, a_context.currentWorld, a_context.currentCell)) {
+				if (header.signature == SIG_WRLD) {
+					a_context.currentWorld = loadOrderFormID;
+				} else if (header.signature == SIG_CELL) {
+					a_context.currentCell = loadOrderFormID;
+				}
+				return;
+			}
 			if (!retainRecord) {
 				if (header.signature == SIG_WRLD) {
 					a_context.currentWorld = loadOrderFormID;
@@ -1586,8 +1609,18 @@ namespace tesworld
 
 			++a_stats.streamedCellRecords;
 			a_stats.streamedCellOutputBytes += scan.outputBytes;
-			if (scan.outputBytes != expectedSize || scan.consumed != a_pendingScratch.size() || stream.avail_in != 0)
-				throw std::runtime_error("invalid compressed CELL length or trailing data");
+			if (scan.outputBytes != expectedSize) {
+				throw std::runtime_error("invalid compressed CELL length: decompressed to " + std::to_string(scan.outputBytes) + " bytes, the record says " +
+										 std::to_string(expectedSize));
+			}
+			if (scan.consumed != a_pendingScratch.size()) {
+				throw std::runtime_error("invalid compressed CELL data: the last " + std::to_string(a_pendingScratch.size() - scan.consumed) +
+										 " decompressed byte(s) are not a whole subrecord");
+			}
+			// Bytes after the end of the zlib stream are ignored, as the game does: TESFile's record inflate (1401c9790 in
+			// AE 1.6.1170) makes one inflate call and only requires Z_STREAM_END, never looking at what input is left.
+			// Some tools pad compressed records with zeros (seen from ESLifier output), and zlib's uncompress, which the
+			// other records go through, ignores them too.
 			return scan.info;
 		}
 
@@ -1676,6 +1709,15 @@ namespace tesworld
 			}
 
 			const auto loadOrderFormID = ConvertContextLocalFormID(header.formID, a_context.entry.fileID, a_context.sourceMasterFileIDs);
+			if (BelongsToMissingMaster(loadOrderFormID, a_context.currentWorld, a_context.currentCell)) {
+				++a_shard.stats.missingMasterRecords;
+				if (header.signature == SIG_WRLD) {
+					a_context.currentWorld = loadOrderFormID;
+				} else if (header.signature == SIG_CELL) {
+					a_context.currentCell = loadOrderFormID;
+				}
+				return;
+			}
 			const auto suppressed = IsSuppressedFlags(header.flags);
 			if (suppressed) {
 				AddSuppressor(a_shard, header, loadOrderFormID, a_context.sourceFileIndex);
@@ -1811,6 +1853,16 @@ namespace tesworld
 			}
 		}
 
+		// "CELL record 0001A26F (compressed, 1234 bytes) at offset 0x5A2B10", for errors: the form ID as the file stores it,
+		// which is what xEdit shows for the plugin.
+		[[nodiscard]] std::string DescribeRecord(const RecordHeader& a_header, std::size_t a_offset)
+		{
+			char text[160];
+			std::snprintf(text, sizeof(text), "%s record %08X (%s%u bytes) at offset 0x%llX", FourCCString(a_header.signature).c_str(), a_header.formID.value,
+				(a_header.flags & RECORD_FLAG_COMPRESSED) != 0 ? "compressed, " : "", a_header.dataSize, static_cast<unsigned long long>(a_offset));
+			return text;
+		}
+
 		void ParseStaticRange(std::span<const std::uint8_t> a_bytes, std::size_t a_begin, std::size_t a_end, StaticPluginShard& a_shard, ParserContext& a_context)
 		{
 			std::size_t offset = a_begin;
@@ -1832,9 +1884,14 @@ namespace tesworld
 				} else {
 					const auto header = ReadRecordHeader(a_bytes, offset);
 					if (offset + 24 + header.dataSize > a_end) {
-						throw std::runtime_error("invalid record size in " + a_shard.entry.pluginName);
+						throw std::runtime_error("invalid record size in " + a_shard.entry.pluginName + ": " + DescribeRecord(header, offset) +
+												 " runs past the end of its group or file");
 					}
-					ParseStaticRecord(a_bytes, offset, a_shard, a_context);
+					try {
+						ParseStaticRecord(a_bytes, offset, a_shard, a_context);
+					} catch (const std::exception& e) {
+						throw std::runtime_error(a_shard.entry.pluginName + ": " + DescribeRecord(header, offset) + ": " + e.what());
+					}
 					offset += 24 + header.dataSize;
 				}
 			}
@@ -2289,7 +2346,7 @@ namespace tesworld
 			.loadOrder = a_loadOrder,
 			.mode = a_mode,
 			.sourceFileIndex = a_sourceFileIndex,
-			.sourceMasterFileIDs = BuildSourceMasterFileIDs(plugin.entry, a_loadOrder),
+			.sourceMasterFileIDs = BuildSourceMasterFileIDs(plugin.entry, a_loadOrder, _missingMasters),
 		};
 		if (a_mode == ParseMode::FullRaw) {
 			ParseRecord(bytes, 0, plugin, context);
@@ -2336,7 +2393,7 @@ namespace tesworld
 			.loadOrder = a_loadOrder,
 			.mode = a_mode,
 			.sourceFileIndex = a_sourceFileIndex,
-			.sourceMasterFileIDs = BuildSourceMasterFileIDs(shard.entry, a_loadOrder),
+			.sourceMasterFileIDs = BuildSourceMasterFileIDs(shard.entry, a_loadOrder, _missingMasters),
 		};
 		const auto scanBegin = Clock::now();
 		const auto begin = 24 + static_cast<std::size_t>(tes4.dataSize);
@@ -2368,6 +2425,17 @@ namespace tesworld
 		shard.stats.scanMilliseconds = ElapsedMilliseconds(scanBegin);
 		shard.stats.totalMilliseconds = ElapsedMilliseconds(totalBegin);
 		return shard;
+	}
+
+	std::vector<std::string> FindMissingMasters(const LoadOrderEntry& a_entry, std::span<const LoadOrderEntry> a_loadOrder)
+	{
+		std::vector<std::string> missing;
+		for (const auto& master : a_entry.masters) {
+			if (!FindLoadOrderIndex(a_loadOrder, master)) {
+				missing.push_back(master);
+			}
+		}
+		return missing;
 	}
 
 	std::vector<LoadOrderEntry> PrepareLoadOrder(std::vector<LoadOrderEntry> a_entries, HeaderCache* a_headerCache)

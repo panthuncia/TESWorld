@@ -55,6 +55,10 @@ namespace tesworld
 		friend bool operator==(const FileID&, const FileID&) = default;
 	};
 
+	// Where a missing master's forms go when PluginParser::MissingMasterPolicy::Skip lets a plugin load without
+	// it: full slot 0xFF, which no plugin has (the engine keeps it for forms created at runtime).
+	inline constexpr FileID kMissingMasterFileID{ ModuleKind::Full, 0xFF };
+
 	struct FormID
 	{
 		std::uint32_t value{ 0 };
@@ -64,6 +68,8 @@ namespace tesworld
 		[[nodiscard]] bool IsEmpty() const { return IsNull() || IsNone(); }
 		[[nodiscard]] bool IsPlayer() const { return value == 0x14u; }
 		[[nodiscard]] bool IsHardcoded() const { return value < 0x800u; }
+		// A form of a master that is not in the load order (kMissingMasterFileID).
+		[[nodiscard]] bool IsFromMissingMaster() const { return (value >> 24) == 0xFFu && !IsNone(); }
 		[[nodiscard]] FileID GetFileID() const;
 		[[nodiscard]] std::uint32_t ObjectID() const;
 		[[nodiscard]] FormID WithFileID(FileID a_fileID) const;
@@ -559,6 +565,9 @@ namespace tesworld
 		static constexpr std::uint8_t DataFlagSmallWorld = 0x01;
 		static constexpr std::uint8_t DataFlagNoLodWater = 0x08;
 		static constexpr std::uint8_t DataFlagNoLandscape = 0x10;
+		// No Grass: the engine enables its grass manager only in a worldspace without it
+		// (PlayerCharacter::SetParentCell), so it neither loads a grass cache nor creates grass there.
+		static constexpr std::uint8_t DataFlagNoGrass = 0x80;
 		static constexpr std::uint16_t ParentUseLandData = 0x0001;
 		static constexpr std::uint16_t ParentUseLodData = 0x0002;
 		static constexpr std::uint16_t ParentUseWaterData = 0x0008;
@@ -598,6 +607,7 @@ namespace tesworld
 		std::uint16_t fields{ 0 };
 
 		[[nodiscard]] bool HasNoLodWater() const { return (dataFlags & DataFlagNoLodWater) != 0; }
+		[[nodiscard]] bool HasNoGrass() const { return (dataFlags & DataFlagNoGrass) != 0; }
 		[[nodiscard]] bool IsPartialForm() const { return (flags & RecordFlagPartialForm) != 0; }
 		// This version with a partial form's fields over it.
 		void Apply(const WorldInfo& a_partial);
@@ -632,6 +642,8 @@ namespace tesworld
 		std::size_t streamedCellRecords{ 0 };
 		std::size_t streamedCellEarlyStops{ 0 };
 		std::size_t streamedCellOutputBytes{ 0 };
+		// Records skipped because they belong to a missing master, or sit in one's world or cell.
+		std::size_t missingMasterRecords{ 0 };
 		std::size_t fileBytes{ 0 };
 		std::size_t uncompressedRecordBytes{ 0 };
 		double readMilliseconds{ 0.0 };
@@ -764,6 +776,16 @@ namespace tesworld
 			_headerCache(a_headerCache)
 		{}
 
+		// A master that is not in the load order. The game refuses such a plugin; Skip loads it anyway: the
+		// master's forms resolve to kMissingMasterFileID, and the plugin's records that override them (or sit
+		// in a world or cell of the master) are skipped, while the rest load as usual.
+		enum class MissingMasterPolicy
+		{
+			Throw,
+			Skip
+		};
+		void SetMissingMasterPolicy(MissingMasterPolicy a_policy) { _missingMasters = a_policy; }
+
 		enum class ParseMode
 		{
 			FullRaw,
@@ -786,7 +808,11 @@ namespace tesworld
 
 	private:
 		HeaderCache* _headerCache{ nullptr };
+		MissingMasterPolicy _missingMasters{ MissingMasterPolicy::Throw };
 	};
+
+	// The masters of a_entry (as its header lists them) that a_loadOrder does not contain.
+	[[nodiscard]] std::vector<std::string> FindMissingMasters(const LoadOrderEntry& a_entry, std::span<const LoadOrderEntry> a_loadOrder);
 
 	[[nodiscard]] std::vector<LoadOrderEntry> PrepareLoadOrder(std::vector<LoadOrderEntry> a_entries, HeaderCache* a_headerCache = nullptr);
 	[[nodiscard]] ResolvedRecordStore BuildResolvedRecordStore(const std::vector<PluginFile>& a_plugins);

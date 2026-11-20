@@ -36,7 +36,7 @@ struct Fixture {
             payload.insert(payload.end(), packed.begin(), packed.end());
             if (corruption == 2) payload.pop_back();
             if (corruption == 3) payload.back() ^= 0xFF;
-            if (corruption == 4) payload.push_back(0);
+            if (corruption == 4) payload.insert(payload.end(), 5, 0); // Padding after the stream, which the game ignores.
         }
         Bytes bytes; Record(bytes, "TES4", 0, 0, {}); Record(bytes, "CELL", 0x800, compressed ? 0x40000u : 0u, payload);
         { std::ofstream out(path, std::ios::binary); out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size())); }
@@ -59,11 +59,13 @@ void CellFieldsAndCompleteInflation() {
         }
     }
     assert((f.Read(data, true).cells[0].fields & CellInfo::FieldEditorID) == 0);
-    for (int corruption = 1; corruption <= 4; ++corruption) {
+    for (int corruption = 1; corruption <= 3; ++corruption) {
         bool failed = false;
         try { (void)f.Read(data, true, corruption); } catch (const std::runtime_error&) { failed = true; }
         assert(failed);
     }
+    const auto padded = f.Read(data, true, 4);
+    assert(padded.cells.size() == 1 && padded.cells[0].fields == f.Read(data, true).cells[0].fields);
     data.push_back(0); // Partial trailing subrecord must not be accepted.
     bool failed = false;
     try { (void)f.Read(data, true); } catch (const std::runtime_error&) { failed = true; }
