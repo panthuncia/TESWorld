@@ -11,7 +11,7 @@
 #include <OpenRenderGraph/PersistentGraphHost.h>
 #endif
 #include <Render/Runtime/RuntimeDevice.h>
-#include <Render/Runtime/ThreadPoolTaskService.h>
+#include "TaskService.h"
 #include <RenderPasses/Base/TypedRenderGraphPass.h>
 #include <Resources/Buffers/Buffer.h>
 #include <rhi_feature_info.h>
@@ -273,7 +273,7 @@ namespace tesworld::gpu
 				.device = _device.Get(),
 				.backend = _backend,
 				.slots = 2,
-				.tasks = std::make_shared<org::runtime::ThreadPoolTaskService>(2),
+				.tasks = std::make_shared<ThreadPoolTaskService>(2),
 			});
 			_host = std::make_unique<org::GraphHost>(org::GraphHost::Desc{
 				.runtime = _runtime,
@@ -284,7 +284,7 @@ namespace tesworld::gpu
 			_host = std::make_unique<org::PersistentGraphHost>(org::PersistentGraphHost::Desc{
 				.device = _device.Get(),
 				.backend = _backend,
-				.tasks = std::make_shared<org::runtime::ThreadPoolTaskService>(2),
+				.tasks = std::make_shared<ThreadPoolTaskService>(2),
 				.framesInFlight = 2,
 				.epochOrder = {},
 			});

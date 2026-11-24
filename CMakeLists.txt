@@ -199,6 +199,7 @@ if(TESWORLD_WITH_GPU)
 	add_library(tesworld_gpu STATIC
 		src/gpu/Compute.cpp
 		src/gpu/Context.cpp
+		src/gpu/TaskService.cpp
 		src/gpu/ImageFrames.cpp
 		src/gpu/TerrainBakeGpu.cpp
 		src/gpu/TextureEncoderGpu.cpp
